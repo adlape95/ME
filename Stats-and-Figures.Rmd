@@ -1,0 +1,4135 @@
+---
+title: "Spanish Microbiome - Results analysis"
+author: "Adriel Latorre-Pérez - Darwin Bioprospecting Excellence S.L."
+date: "2020-2021"
+output: html_document
+---
+
+
+Optional rdata removal.
+
+```{r}
+rm (list = ls())
+```
+
+
+# Data import to phyloseq and sequencing statistcs
+
+[phyloseq tutorial here](https://joey711.github.io/phyloseq/import-data.html).
+
+Import BIOM to phyloseq.
+
+Original BIOM was prepared with qiime2. Please, include your own BIOM file in the code below
+
+```{r}
+library(phyloseq)
+physeqObjest <- import_biom(BIOMfilename = XXXXXX,
+                 refseqArgs=NULL, parseFunction = parse_taxonomy_default, 
+                 parallel=FALSE,
+                 treefilename = XXXXX)
+physeqObjest
+```
+
+OTU number: 25934
+Sample number: 534
+
+*Note: the number of samples will change since here I am taking into acount all the samples that have been sequenced, but not all of them correspond to accepted participants*
+
+## Seqs per sample
+
+```{r}
+summary(sample_sums(physeqObjest))
+```
+
+Median ar 1st Quartile are really good (>70K and >40K seqs/samples). There are some samples with little sequences. These samples may be removed from further analyses.
+
+Number of samples under 10K seqs?
+
+```{r}
+length(sample_sums(physeqObjest)[sample_sums(physeqObjest) < 10000])
+```
+
+Number of samples under 15K?
+
+```{r}
+length(sample_sums(physeqObjest)[sample_sums(physeqObjest) < 15000])
+```
+
+Number of samples under 20K?
+
+```{r}
+length(sample_sums(physeqObjest)[sample_sums(physeqObjest) < 20000])
+```
+
+I should think if I establish some kind of threshold for excluding samples with less than X number of seqs.
+
+## Metadata loading
+
+This metadata is provisional. The file will be modified for adding more info from the polls. For now, we have only some variables (region, age and sex), but this will increase to include weight, height, alcoholic habits, etc.
+
+```{r}
+# METADATA
+mapfile = read.csv("./Metadata-provisional.csv", header = TRUE, sep=",",  colClasses=c("id"="character"))
+samples = mapfile[,1]
+rownames(mapfile) = samples
+mapfile = mapfile[,2:length(colnames(mapfile))]
+# Change the row order to match the physeq's order
+ord = match(colnames(otu_table(physeqObjest)), rownames(mapfile))
+mapfile = mapfile[ord,]
+sampledata = sample_data(mapfile)
+
+physeq1 = merge_phyloseq(physeqObjest, sampledata)
+physeq1
+```
+
+**4 samples from participants that were finally discarded from the study have been removed. So:**
+
+Total number of samples: 530
+
+## Summary of variables
+
+Let's see how the sample looks like in terms of the main variables (age, region and sex):
+
+```{r}
+summary(as.data.frame(sample_data(physeq1)[,c("Gender", "Age.range", "Region")]), maxsum = 100)
+```
+
+The sample has been selected to be representative of the spanish demography. For example, the number of participans from each region is proportional to the population of this region.
+
+## Summary of removed samples (if rarefying at 15K)
+
+```{r}
+ids = names(sample_sums(physeqObjest)[sample_sums(physeqObjest) < 15000])
+summary(sample_data(physeq1)[ids, ],  maxsum = 100)
+```
+
+
+-------------------------------------------------------------------------------------------
+
+# Rarefaction curves
+
+As it will be impossible to generate a single legible graph, I will generate one figure for each batch of 20 samples.
+
+```{r}
+library("iNEXT")
+library(ggplot2)
+x = seq(from = 0, to = length(sample_sums(physeq1)), by = 20)
+for (i in x){
+  if (i != x[length(x)]) {
+    print (c((i+1):(i+20)))
+    Rarefaction <- iNEXT(as.data.frame(otu_table(physeq1)[, c((i+1):(i+20))]), q=0, datatype="abundance")
+    Rareplot1 <- ggiNEXT(x=Rarefaction, type=1) + theme_bw() + geom_line(size=0.1) +
+    geom_point(size=0, na.rm = TRUE) + scale_shape_manual(values=c(rep(20,55))) +
+    xlab("Number of sequences") + ylab("Richness (Observed OTUs)")
+    ggsave(paste("./Figures/Rarefaction", i, ".svg", sep = ""), plot = Rareplot1, device = "svg")
+  }
+  else {
+    print(c((i+1):length(sample_sums(physeq1))))
+    Rarefaction <- iNEXT(as.data.frame(otu_table(physeq1)[, c((i+1):length(sample_sums(physeq1)))]), q=0,
+                         datatype="abundance")
+    Rareplot1 <- ggiNEXT(x=Rarefaction, type=1) + theme_bw() + geom_line(size=0.1) +
+    geom_point(size=0, na.rm = TRUE) + scale_shape_manual(values=c(rep(20,55))) +
+    xlab("Number of sequences") + ylab("Richness (Observed OTUs)")
+    ggsave(paste("./Figures/Rarefaction", i, ".svg", sep = ""), plot = Rareplot1, device = "svg")
+  }
+  }
+```
+
+
+## Rarefaction: low n. of seqs/sapmle
+
+I will also create a specific plot for those samples that had less sequences, just to check if these samples have reached the plateau.
+
+```{r}
+pocas = names(sample_sums(physeqObjest)[sample_sums(physeqObjest) < 15000])
+library("iNEXT")
+library(ggplot2)
+Rarefaction <- iNEXT(as.data.frame(otu_table(physeq1)[, pocas]), q=0, datatype="abundance")
+Rareplot1 <- ggiNEXT(x=Rarefaction, type=1) + theme_bw() +
+  geom_line(size=0.1) +
+  geom_point(size=0, na.rm = TRUE) +
+  scale_shape_manual(values=c(rep(20,55))) + xlab("Number of sequences") + ylab("Richness (Observed OTUs)")
+Rareplot1
+```
+
+
+Let's make the graph interactive.
+
+```{r}
+library(ggplot2)
+library(plotly)
+fig = ggplotly(Rareplot1)
+
+htmlwidgets::saveWidget(fig, "Rarefaction-pocas.html")
+```
+
+Everything is collapsed, but I think we can still consider to discard <10-15K seqs samples.
+
+# Collapsing and CSV tables
+
+## ASV table (OTU table)
+
+Relativize the phyloseq object
+
+```{r}
+physeq1_rel  = transform_sample_counts(physeq1, function(x) x / sum(x)*100 )
+# sample_sums(physeq1_rel)
+```
+
+Create the CSV table
+
+```{r echo=FALSE, reuslts=FALSE, warning=FALSE, comment=FALSE}
+# Change name to be valid
+sample_names(physeq1_rel) = paste(rep("X", 530), sample_names(physeq1_rel), sep = "")
+# Create the data.frame
+all = phyloseq_to_df(physeq1_rel, sorting = NULL)
+# Write the table
+write.table(all, row.names = FALSE, file = "./rel_ASV_table.csv", quote = FALSE, sep = '\t', dec = '.')
+```
+
+## Genus level
+
+Collapse to genus and relativize:
+
+```{r}
+physeq_R6 <- tax_glom(physeq1, taxrank = rank_names(physeq1)[6], NArm = FALSE)
+physeq_R6_rel  = transform_sample_counts(physeq_R6, function(x) x / sum(x)*100 )
+# sample_sums(physeq_R6_rel)
+```
+
+```{r echo=FALSE, reuslts=FALSE, warning=FALSE, comment=FALSE}
+# Change name to be valid
+sample_names(physeq_R6_rel) = paste(rep("X", 530), sample_names(physeq_R6_rel), sep = "")
+# Create the data.frame
+all = phyloseq_to_df(physeq_R6_rel, sorting = NULL)
+# Write the table
+write.table(all, row.names = FALSE, file = "./rel_L6_table.csv", quote = FALSE, sep = '\t', dec = '.')
+```
+
+
+## Phylum level
+
+Collapse to genus and relativize:
+
+```{r}
+physeq_R2 <- tax_glom(physeq1, taxrank = rank_names(physeq1)[2], NArm = FALSE)
+physeq_R2_rel  = transform_sample_counts(physeq_R2, function(x) x / sum(x)*100 )
+# sample_sums(physeq_R6_rel)
+```
+
+```{r echo=FALSE, reuslts=FALSE, warning=FALSE, comment=FALSE}
+# Change name to be valid
+sample_names(physeq_R2_rel) = paste(rep("X", 530), sample_names(physeq_R2_rel), sep = "")
+# Create the data.frame
+all = phyloseq_to_df(physeq_R2_rel, sorting = NULL)
+# Write the table
+write.table(all, row.names = FALSE, file = "./rel_L2_table.csv", quote = FALSE, sep = '\t', dec = '.')
+```
+
+-------------------------------------------------------------------------------
+
+# Taxonomic summary
+
+I'm gonna use [amvpis2](http://albertsenlab.org/ampvis2-heatmap/) as an alternative to barplots. Also, it's really easy to use directly from phyloseq objects, and it creates very good visualizations really fast.
+
+So, let's convert the phyloseq object in an ampvis object. I will use the physeq1 object (ASV table), already relativized. I will relativize the object again, since the previous object has been modified to include a "X" in the label of the samples. This "X" makes ampvis not to work properly.
+
+```{r}
+physeq1_rel  = transform_sample_counts(physeq1, function(x) x / sum(x)*100 )
+# sample_sums(physeq1_rel)
+```
+
+
+```{r}
+library(ampvis2)
+if(!require("devtools"))
+  install.packages("devtools")
+#source the phyloseq_to_ampvis2() function from the gist
+devtools::source_gist("8d0ca4206a66be7ff6d76fc4ab8e66c6")
+
+# Necesitamos cambiar los colnames de la taxtable:
+colnames(tax_table(physeq1_rel)) = c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
+#go converty
+ampvis2_obj <- phyloseq_to_ampvis2(physeq1_rel)
+
+# Cambiamos el metadata para que la figura salga con el orden y los nombres que queremos
+rownames(ampvis2_obj$metadata) = ampvis2_obj$metadata[,"SampleName"]
+colnames(ampvis2_obj$abund) = ampvis2_obj$metadata[,"SampleName"]
+```
+
+Now let's do some visualizations by different variables.
+
+*Note*: this graphs will help us to see great variations or similarities among groups, but for better results boxplots or violin plots should be used for pointing at differences between specific groups at a defined taxonomic level (p.e. Firmicutes in Male vs. Female)
+
+## Phylum - by Gender
+
+```{r}
+p = amp_heatmap(
+      data = ampvis2_obj,
+      facet_by = "IMC",
+      normalise = FALSE,
+      tax_show = 12,
+      tax_aggregate = "Phylum",
+      plot_values_size = 3,
+      min_abundance = 0.000001,
+      color_vector = c("gray90",
+                       "whitesmoke",
+                       "lightgoldenrod1",
+                       "tan1",
+                       "lightcoral"),
+      round = 4,
+      plot_colorscale = "sqrt"
+    )
+p
+```
+
+I have iteratively adjusted the number of taxa to show in order to obtain a good visualization at the cost of omitting some phyla which abundance is really close to 0.
+
+```{r}
+p = amp_heatmap(
+      data = ampvis2_obj,
+      facet_by = "Gender",
+      normalise = FALSE,
+      tax_show = 12,
+      tax_aggregate = "Phylum",
+      plot_values_size = 3,
+      min_abundance = 0.000001,
+      color_vector = c("gray90",
+                       "whitesmoke",
+                       "lightgoldenrod1",
+                       "tan1",
+                       "lightcoral"),
+      round = 4
+    )
+p
+```
+
+All the plots are gonna be saved with the Rstudio tool, since it helps me to dynamically decide the size of the plot.
+
+## Phylum - by Age
+
+```{r}
+p = amp_heatmap(
+      data = ampvis2_obj,
+      facet_by = "Age_range",
+      normalise = FALSE,
+      tax_show = 12,
+      tax_aggregate = "Phylum",
+      plot_values_size = 3,
+      min_abundance = 0.000001,
+      color_vector = c("gray90",
+                       "whitesmoke",
+                       "lightgoldenrod1",
+                       "tan1",
+                       "lightcoral"),
+      round = 4
+    )
+p
+```
+
+## Phylum - by Region
+
+I will avoid faceting (labels don't feed the facet tittle)
+
+```{r}
+p = amp_heatmap(
+      data = ampvis2_obj,
+      group_by = "Region",
+      normalise = FALSE,
+      tax_show = 12,
+      tax_aggregate = "Phylum",
+      plot_values_size = 3,
+      min_abundance = 0.000001,
+      color_vector = c("gray90",
+                       "whitesmoke",
+                       "lightgoldenrod1",
+                       "tan1",
+                       "lightcoral"),
+      round = 4
+    )
+p
+```
+
+
+## Genus - General (mean abundance)
+
+It will show top 30 genera.
+
+ampvis automatically remove genus = NA taxa when collapsing. So, the best way to plot Genus values with ampvis is to directly use the object collapsed in phyloseq.
+
+```{r}
+library(ampvis2)
+if(!require("devtools"))
+  install.packages("devtools")
+#source the phyloseq_to_ampvis2() function from the gist
+devtools::source_gist("8d0ca4206a66be7ff6d76fc4ab8e66c6")
+
+# Necesitamos cambiar los colnames de la taxtable:
+colnames(tax_table(physeq_R6_rel)) = c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
+#go converty
+ampvis2_obj <- phyloseq_to_ampvis2(physeq_R6_rel)
+
+# Cambiamos el metadata para que la figura salga con el orden y los nombres que queremos
+rownames(ampvis2_obj$metadata) = ampvis2_obj$metadata[,"SampleName"]
+colnames(ampvis2_obj$abund) = ampvis2_obj$metadata[,"SampleName"]
+```
+
+```{r}
+p = amp_heatmap(
+      data = ampvis2_obj,
+      facet_by = "IMC",
+      normalise = FALSE,
+      tax_show = 30,
+      tax_aggregate = "Genus",
+      plot_values_size = 3,
+      min_abundance = 0.000001,
+      color_vector = c("gray90",
+                       "whitesmoke",
+                       "lightgoldenrod1",
+                       "tan1",
+                       "lightcoral"),
+      round = 4,
+      plot_colorscale = "sqrt"
+    )
+p
+```
+
+## Genus - by Gender
+
+```{r}
+p = amp_heatmap(
+      data = ampvis2_obj,
+      facet_by = "Gender",
+      normalise = FALSE,
+      tax_show = 30,
+      tax_aggregate = "Genus",
+      plot_values_size = 3,
+      min_abundance = 0.000001,
+      color_vector = c("gray90",
+                       "whitesmoke",
+                       "lightgoldenrod1",
+                       "tan1",
+                       "lightcoral"),
+      round = 4,
+      plot_colorscale = "sqrt"
+    )
+p
+```
+
+## Genus - by Age
+
+```{r}
+p = amp_heatmap(
+      data = ampvis2_obj,
+      facet_by = "Age_range",
+      normalise = FALSE,
+      tax_show = 30,
+      tax_aggregate = "Genus",
+      plot_values_size = 3,
+      min_abundance = 0.000001,
+      color_vector = c("gray90",
+                       "whitesmoke",
+                       "lightgoldenrod1",
+                       "tan1",
+                       "lightcoral"),
+      round = 4,
+      plot_colorscale = "sqrt"
+    )
+p
+```
+
+## Genus - by Region
+
+```{r}
+p = amp_heatmap(
+      data = ampvis2_obj,
+      group_by = "Region",
+      normalise = FALSE,
+      tax_show = 30,
+      tax_aggregate = "Genus",
+      plot_values_size = 3,
+      min_abundance = 0.000001,
+      color_vector = c("gray90",
+                       "whitesmoke",
+                       "lightgoldenrod1",
+                       "tan1",
+                       "lightcoral"),
+      round = 4,
+      plot_colorscale = "sqrt"
+    )
+p
+```
+
+-------------------------------------------------------------------------------
+
+# Alpha-diversity
+
+## By Age
+
+Let's check if microbial diversity depends on age-group.
+
+### No normalization
+
+```{r}
+library(ggplot2)
+p = plot_richness(physeq1, x="Age.range", color="Age.range", measures=c("Observed","Simpson", "Shannon", "Chao1"), nrow = 4) + xlab("") + ylab("") + geom_boxplot(alpha = .4, color = "black") + geom_point() + geom_violin(alpha = .4) + theme_light()
+p
+```
+
+### Rarefaction
+
+15K seqs (samples <15K samples -17 samples- will be removed)
+
+```{r}
+library(ggplot2)
+p = plot_richness(rarefy_even_depth(physeq1, sample.size = 15000, rngseed = 711), x="Age.range", color="Age.range", measures=c("Observed","Simpson", "Shannon", "Chao1"), nrow = 4) + xlab("") + ylab("") + geom_boxplot(alpha = .4, color = "black") + geom_point() + geom_violin(alpha = .4) + theme_light()
+p
+```
+
+## By Gender
+
+### No normalization
+
+```{r}
+library(ggplot2)
+p = plot_richness(physeq1, x="Gender", color="Gender", measures=c("Observed","Simpson", "Shannon"), nrow = 4) + xlab("") + ylab("") + geom_boxplot(alpha = .4) + theme_light()
+p
+```
+
+### Rarefaction
+
+15K seqs (samples <15K samples -17 samples- will be removed)
+
+```{r}
+library(ggplot2)
+p = plot_richness(rarefy_even_depth(physeq1, sample.size = 15000, rngseed = 711), x="Gender", color="Gender", measures=c("Observed","Simpson", "Shannon"), nrow = 4) + xlab("") + ylab("") + geom_boxplot(alpha = .4) + theme_light()
+p
+```
+
+```{r}
+physeqRarefied = rarefy_even_depth(physeq1, sample.size = 15000, rngseed = 711)
+alfa = estimate_richness(physeqRarefied)
+```
+
+**Richness Male vs Female**
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+wilcox.test(alfa$Observed[sample_data(physeqRarefied)$Gender == "Female"],
+            alfa$Observed[sample_data(physeqRarefied)$Gender == "Male"])
+```
+
+**NO!**
+
+**Shannon**
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+wilcox.test(alfa$Shannon[sample_data(physeqRarefied)$Gender == "Female"],
+            alfa$Shannon[sample_data(physeqRarefied)$Gender == "Male"])
+```
+
+## By Region
+
+### No normalization
+
+```{r}
+library(ggplot2)
+p = plot_richness(physeq1, x="Region", color="Region", measures=c("Observed","Simpson", "Shannon", "Chao1"), nrow = 4, sortby = "Observed") + xlab("") + ylab("") + geom_boxplot(alpha = .4, notch = TRUE) + geom_point() + theme_light() + theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none") 
+p
+```
+
+### Rarefaction
+
+15K seqs (samples <15K samples -17 samples- will be removed).
+
+Sorted by richness.
+
+```{r}
+library(ggplot2)
+p = plot_richness(physeqRarefied, x="Region", color="Region", measures=c("Observed","Simpson", "Shannon", "Chao1"), nrow = 4, sortby = "Observed") + xlab("") + ylab("") + geom_boxplot(alpha = .4, notch = TRUE) + geom_point() + theme_light() + theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none") 
+p
+```
+
+
+### Alfa-diversity vs Area (Med. Vs Rest Vs Island)
+
+```{r}
+physeqRarefied = rarefy_even_depth(physeq1, sample.size = 15000, rngseed = 711)
+alfa = estimate_richness(physeqRarefied)
+```
+
+Remove the X from the alfa's rownames. This is necessary for matching the rownames of alfa and the rownames of the original phyloseq object created for calculating alfa. The 'X' is added by default by the estimate_richness function.
+
+```{r}
+# Remove the first character
+n = substring(rownames(alfa), 2)
+# Fix the two MEXXXX ids (lasts IDs)
+n[c(length(n) - 1, length(n))] = paste("M", n[c(length(n) - 1, length(n))], sep = "")
+
+rownames(alfa) = n
+```
+
+**Richness Med. Vs Rest.**
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+wilcox.test(alfa$Observed[sample_data(physeqRarefied)$Area == "Rest"],
+            alfa$Observed[sample_data(physeqRarefied)$Area == "Mediterranean"])
+```
+
+**NO!**
+
+**Shannon Med. Vs Rest.**
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+wilcox.test(alfa$Shannon[sample_data(physeqRarefied)$Area == "Rest"],
+            alfa$Shannon[sample_data(physeqRarefied)$Area == "Mediterranean"])
+```
+
+**NO!**
+
+**Richness Med. Vs Island**
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+wilcox.test(alfa$Observed[sample_data(physeqRarefied)$Area == "Island"],
+            alfa$Observed[sample_data(physeqRarefied)$Area == "Mediterranean"])
+```
+
+**NO!**
+
+**Shannon Med. Vs Island**
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+wilcox.test(alfa$Shannon[sample_data(physeqRarefied)$Area == "Island"],
+            alfa$Shannon[sample_data(physeqRarefied)$Area == "Mediterranean"])
+```
+
+**NO!**
+
+**Richness Rest Vs Island**
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+wilcox.test(alfa$Observed[sample_data(physeqRarefied)$Area == "Island"],
+            alfa$Observed[sample_data(physeqRarefied)$Area == "Rest"])
+```
+
+**YES!**
+
+**Shannon Rest Vs Island**
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+wilcox.test(alfa$Shannon[sample_data(physeqRarefied)$Area == "Island"],
+            alfa$Shannon[sample_data(physeqRarefied)$Area == "Rest"])
+```
+
+**NO!**
+
+**Richness Peninsula Vs Island**
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+wilcox.test(alfa$Observed[sample_data(physeqRarefied)$Area == "Island"],
+            alfa$Observed[sample_data(physeqRarefied)$Area != "Island"])
+```
+
+**YES!**
+
+**Shannon Peninsula Vs Island**
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+wilcox.test(alfa$Shannon[sample_data(physeqRarefied)$Area == "Island"],
+            alfa$Shannon[sample_data(physeqRarefied)$Area != "Island"])
+```
+
+**Pairwise comparison with correctio**
+
+Prepare the object with the metadata:
+
+```{r}
+alfa = data.frame(alfa, sample_data(physeqRarefied)[rownames(alfa), c("Area", "Region")])
+```
+
+And perform the test.
+
+*Observed*
+
+```{r}
+pairwise.wilcox.test(alfa$Observed, alfa$Area, p.adjust.method = "BH")
+```
+
+*Shannon*
+
+```{r}
+pairwise.wilcox.test(alfa$Shannon, alfa$Area, p.adjust.method = "BH")
+```
+
+### Alfa-diversity vs All Regions
+
+Data was prepared above, but Ceuta needs to be excluded, since there's only 1 sample for this region.
+
+```{r}
+alfa2 = alfa[alfa$Region != "CEUTA",]
+```
+
+
+*Observed*
+
+```{r}
+res = pairwise.wilcox.test(alfa2$Observed, alfa2$Region, p.adjust.method = "BH")
+table(res$p.value < 0.05)
+```
+
+*Shannon*
+
+```{r}
+res = pairwise.wilcox.test(alfa2$Shannon, alfa2$Region, p.adjust.method = "BH")
+table(res$p.value < 0.05)
+```
+
+# Beta-diversity
+
+## ASV-level
+
+```{r}
+library(ggplot2)
+# Calculate distance matrix
+brayDist <- phyloseq::distance(physeq1_rel, method="bray")
+# Calculate ordination
+iMDS  <- ordinate(physeq1_rel, distance=brayDist, method = "PCoA")
+## Make plot
+# Create plot, store as temp variable, p
+p <- plot_ordination(physeq1_rel, iMDS, color ="Region", shape = "Gender") + theme_light()
+# Costumize the plot
+p = p + geom_point(aes(size=1, alpha = 0.6))
+p
+```
+
+## ASV-level - Gender
+
+```{r}
+library(vegan)
+physeq33 <- as(sample_data(physeq1_rel), "data.frame")
+adonis2(brayDist ~ Gender, data = physeq33)
+```
+
+**YES!**
+
+## ASV-level - Mediterranean vs. Islands vs. Rest - PERMANOVA
+
+```{r}
+library(ggplot2)
+# Calculate distance matrix
+brayDist <- phyloseq::distance(physeq1_rel, method="bray")
+# Calculate ordination
+iMDS  <- ordinate(physeq1_rel, distance=brayDist, method = "PCoA")
+## Make plot
+# Create plot, store as temp variable, p
+p <- plot_ordination(physeq1_rel, iMDS, color ="Area") + theme_light()
+# Costumize the plot
+p = p + geom_point(aes(size=1, alpha = 0.6))
+p
+```
+
+Axis 1 vs 3
+
+```{r}
+p <- plot_ordination(physeq1_rel, iMDS, color ="Area", axes = c(1,3)) + theme_light()
+# Costumize the plot
+p = p + geom_point(aes(size=1, alpha = 0.6))
+p
+```
+
+Axis 2 vs 3
+
+```{r}
+p <- plot_ordination(physeq1_rel, iMDS, color ="Area", axes = 2:3) + theme_light()
+# Costumize the plot
+p = p + geom_point(aes(size=1, alpha = 0.6))
+p
+```
+
+
+```{r}
+library(vegan)
+physeq33 <- as(sample_data(physeq1_rel), "data.frame")
+adonis2(brayDist ~ Area, data = physeq33)
+```
+
+It's significant
+
+Now, let's do it pairwise.
+
+## ASV-level - Mediterranean vs. Islands
+
+Subset the data
+
+```{r}
+set1 = subset_samples(physeq1_rel, Area != "Rest")
+```
+
+And do the PERMANOVA
+
+```{r}
+brayDist <- phyloseq::distance(set1, method="bray")
+library(vegan)
+physeq33 <- as(sample_data(set1), "data.frame")
+adonis2(brayDist ~ Area, data = physeq33)
+```
+
+**YES!**
+
+## ASV-level - Rest vs. Islands
+
+Subset the data
+
+```{r}
+set1 = subset_samples(physeq1_rel, Area != "Mediterranean")
+```
+
+And do the PERMANOVA
+
+```{r}
+brayDist <- phyloseq::distance(set1, method="bray")
+library(vegan)
+physeq33 <- as(sample_data(set1), "data.frame")
+adonis2(brayDist ~ Area, data = physeq33)
+```
+
+**YES!**
+
+## ASV-level - Rest vs. Med
+
+Subset the data
+
+```{r}
+set1 = subset_samples(physeq1_rel, Area != "Island")
+```
+
+And do the PERMANOVA
+
+```{r}
+brayDist <- phyloseq::distance(set1, method="bray")
+library(vegan)
+physeq33 <- as(sample_data(set1), "data.frame")
+adonis2(brayDist ~ Area, data = physeq33)
+```
+
+**NO!**
+
+## Genus-level - Mediterranean vs. Islands vs. Rest
+
+```{r}
+brayDist <- phyloseq::distance(physeq_R6_rel, method="bray")
+library(vegan)
+physeq33 <- as(sample_data(physeq_R6_rel), "data.frame")
+adonis2(brayDist ~ Area, data = physeq33)
+```
+
+*Significativo*
+
+## Genus-level - Mediterranean vs. Islands
+
+Subset the data
+
+```{r}
+set1 = subset_samples(physeq_R6_rel, Area != "Rest")
+```
+
+```{r}
+brayDist <- phyloseq::distance(set1, method="bray")
+library(vegan)
+physeq33 <- as(sample_data(set1), "data.frame")
+adonis2(brayDist ~ Area, data = physeq33)
+```
+
+**YES!**
+
+## Genus-level - Rest vs. Islands
+
+Subset the data
+
+```{r}
+set1 = subset_samples(physeq_R6_rel, Area != "Mediterranean")
+```
+
+```{r}
+brayDist <- phyloseq::distance(set1, method="bray")
+library(vegan)
+physeq33 <- as(sample_data(set1), "data.frame")
+adonis2(brayDist ~ Area, data = physeq33)
+```
+
+**YES!**
+
+## ASV-level - Mediterranean vs. Islands vs. Rest - WEIGHTED UNIFRAC
+
+```{r}
+library(ggplot2)
+# Calculate distance matrix
+wuniDist <- phyloseq::distance(physeq1_rel, method="wunifrac")
+# Calculate ordination
+iMDS  <- ordinate(physeq1_rel, distance=wuniDist, method = "PCoA")
+## Make plot
+# Create plot, store as temp variable, p
+p <- plot_ordination(physeq1_rel, iMDS, color ="Area") + theme_light()
+# Costumize the plot
+p = p + geom_point(aes(size=1, alpha = 0.6))
+p
+```
+
+
+```{r}
+library(vegan)
+physeq33 <- as(sample_data(physeq1_rel), "data.frame")
+adonis2(wuniDist ~ Area, data = physeq33)
+```
+
+
+## ASV-level - Mediterranean vs. Islands vs. Rest - UNWEIGHTED UNIFRAC
+
+```{r}
+library(ggplot2)
+# Calculate distance matrix
+wuniDist <- phyloseq::distance(physeq1_rel, method="unifrac")
+# Calculate ordination
+iMDS  <- ordinate(physeq1_rel, distance=wuniDist, method = "PCoA")
+## Make plot
+# Create plot, store as temp variable, p
+p <- plot_ordination(physeq1_rel, iMDS, color ="Area") + theme_light()
+# Costumize the plot
+p = p + geom_point(aes(size=1, alpha = 0.6))
+p
+```
+
+
+```{r}
+library(vegan)
+physeq33 <- as(sample_data(physeq1_rel), "data.frame")
+adonis2(wuniDist ~ Area, data = physeq33)
+```
+
+
+## Genus-level - Rest vs. Med
+
+Subset the data
+
+```{r}
+set1 = subset_samples(physeq_R6_rel, Area != "Island")
+```
+
+```{r}
+brayDist <- phyloseq::distance(set1, method="bray")
+library(vegan)
+physeq33 <- as(sample_data(set1), "data.frame")
+adonis2(brayDist ~ Area, data = physeq33)
+```
+
+**NO!**
+
+-------------------------------------------------------------------------------------
+
+# Graphs on maps
+
+In this section I will try to represent some microbial ecology variable directly on the Spain's map.
+
+I'm following [this tutorial](https://www.cienciadedatos.net/documentos/58_mapas_con_r.html), but I downloaded the Spain's Map dividided only by Autonomous Regions (not municipalities). This map has been downloaded from [ArcGIS website](https://www.arcgis.com/home/item.html?id=5f689357238847bc823a2fb164544a77)
+
+  ### Read the map file (shp)
+  
+  The map is stored in a SHP file. Let's load it into R using the rgdal package.
+  
+  ```{r}
+  mapa <- rgdal::readOGR("./mapaComunidadesAutonomas/Comunidades_Autonomas_ETRS89_30N.shp")
+  ```
+  
+  As can be seen, this is an S4 object with many slots. 
+  
+  ### Change format
+
+In order to use ggplot2 we need a data.frame, not a map object.
+
+I will select "Codigo" as main variable. This variable is a unique ID for each Autonomous Region in Spain.
+
+```{r}
+library(ggplot2)
+library(ggfortify)
+mapa_df <- fortify(model = mapa, region = "Codigo")
+```
+
+### Expand metadata
+
+Let's join the rest of the metadata (region names) to the map data.frame.
+
+Create a data.frame with the rest of the metadata.
+
+```{r}
+info_municipios = mapa@data
+```
+
+And merge the two data.frames
+
+```{r}
+mapa_df <- merge(mapa_df, info_municipios, by.x = "id", by.y = "Codigo")
+```
+
+### Plot the map
+
+
+```{r}
+p_map = ggplot(data = mapa_df, aes(x = long, y = lat, group = group)) +
+  geom_polygon(color = "black", fill = "gold3") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks =  element_blank(),
+    axis.title = element_blank(),
+    panel.border = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+```
+
+### Fill by Autonomous Region and other changes
+
+"Texto" is the variable that contains de region's name in mapa_df.
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+nb.cols <- 19
+mycolors <- colorRampPalette(brewer.pal(12, "Set3"))(nb.cols)
+
+p_map = ggplot(data = mapa_df, aes(x = long, y = lat, group = group, fill = Texto)) +
+  geom_polygon(color = "white", size = 0.4) +
+  theme_light() +
+  scale_fill_manual(values = mycolors) +
+  labs(title = "Spain's Map",
+       subtitle = "Color by Autonomous Regions") +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks =  element_blank(),
+    axis.title = element_blank(),
+    panel.border = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "none"
+  )
+```
+
+
+### Fixing the Canary Islands
+
+The Canary Islands are too far from the Peninsula, but as usual, we're going to move them closer to the mainland.
+
+What I'm going to do is to modify the long and lat values in an arbritary way.
+
+ID Canary Islands = 5
+
+For estimating the factor in which I will modify the coordinates, I will take the southest point of Andalucía and the western point of Galicia as a reference. Then, I will add some margins just to prevent overlapping.
+
+```{r}
+# Galicia's long summary
+summary(mapa_df[mapa_df$id == "12", "long"])
+```
+
+```{r}
+# Andalucia's lat summary
+summary(mapa_df[mapa_df$id == "01", "lat"])
+```
+
+```{r}
+# Canary Islands long and lat summaries
+summary(mapa_df[mapa_df$id == "05", c("long", "lat")])
+```
+
+I will ad +500,000 to long and lat
+
+*Note:* after plotting I have adjusted the value from 500,000 to 650,000
+
+
+```{r}
+mapa_df_fixed = mapa_df
+mapa_df_fixed[mapa_df_fixed$id == "05", c("long", "lat")] = mapa_df_fixed[mapa_df_fixed$id == "05", c("long", "lat")] + 650000
+```
+
+And now let's plot the map
+
+```{r}
+library(RColorBrewer)
+
+nb.cols <- 19
+mycolors <- colorRampPalette(brewer.pal(12, "Set3"))(nb.cols)
+
+p_map = ggplot(data = mapa_df_fixed, aes(x = long, y = lat, group = group, fill = Texto)) +
+  geom_polygon(color = "black", size = 0.1) +
+  theme_light() +
+  scale_fill_manual(values = mycolors) +
+  labs(title = "Spain's Map",
+       subtitle = "Color by Autonomous Regions") +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks =  element_blank(),
+    axis.title = element_blank(),
+    panel.border = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "none"
+  )
+```
+
+## alpha-diversity on the Spain's map
+
+### W/O NORMALIZATION/RAREFACTION
+
+First, let's calculate de diversity metrics with the phyloseq::estimate_richness function.
+
+```{r}
+rich = estimate_richness(physeq1)
+# Add a column with the sampleID but with no "X" (R puts this "X" automatically)
+rich$SampleID = substr(rownames(rich), 2, 20)
+# But this is not applicable to the 2 samples which ID starts with ME
+# Let's change these SampleIDs
+rich$SampleID[rich$SampleID == "E10670001415"] = "ME10670001415"
+rich$SampleID[rich$SampleID == "E10678455290"] = "ME10678455290"
+head(rich)
+```
+
+Now, let's add the metadata to the rich data.frame. We will merge the two objects
+
+```{r}
+rich_merged = merge(rich, data.frame(sample_data(physeq1)), by.x = "SampleID", by.y = "SampleName")
+head(rich_merged)
+```
+
+We're not interested in all the variables, but some. Let's select them.
+
+```{r}
+rich_merged = rich_merged[, c("Observed", "Chao1", "Shannon", "Simpson", "id", "Region")]
+head(rich_merged)
+```
+
+Let's calculate the average values per id (in other words: per Autonomous Region). Will use aggregate.
+
+```{r}
+x = aggregate(rich_merged[, 1:4], list(rich_merged$id, rich_merged$Region), mean)
+colnames(x)[c(1:2)] = c("id", "Region.check")
+x
+```
+
+Now let's merge the map with this last data.frame.
+
+```{r}
+alfa.map = mapa_df_fixed
+alfa.map = merge(mapa_df_fixed, x, by = "id")
+```
+
+
+We're ready to plot the diversity maps.
+
+### Richness map
+
+```{r}
+library(ggplot2)
+
+p_map = ggplot(data = alfa.map, aes(x = long, y = lat, group = group, fill = Observed)) +
+  geom_polygon(color = "black", size = 0.2) +
+  theme_light() +
+  labs(title = "Riqueza microbiana por Com. Autónoma",
+       caption = "*Datos sin normalizar",
+       subtitle = "Proyecto Microbioma Español",
+       fill = "") +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks =  element_blank(),
+    axis.title = element_blank(),
+    panel.border = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    plot.subtitle = element_text(size = 11, hjust = 0, color = "gray25"),
+    plot.caption = element_text(size = 10, hjust = 1, face = "italic")
+  )
+```
+
+There's a problem with Melilla that prevents the graph to be correctly visualized. Melilla is only represented by a single sample. The sequencing depth of this sample is too low, so also the richness. There are 2 options for fixing this: (1) Removing Melilla from the data.set (it will also occur when we rarefy) or (2) try to set a more drastic gradient.
+
+I tried option 2 but it doesn't worke, since all the rest of values range from 250-350 (Melilla = 82)
+
+So, let's remove Mellila from the map :(
+
+```{r}
+no.melilla = alfa.map[alfa.map$id != "19",]
+```
+
+And try again.
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+library(viridis)
+
+p_map = ggplot(data = no.melilla, aes(x = long, y = lat, group = group, fill = Observed)) +
+  geom_polygon(color = "black", size = 0.2) +
+  theme_light() +
+  scale_fill_gradient(low = "lightgoldenrod1", high = "indianred") + 
+  labs(title = "Riqueza microbiana por Com. Autónoma",
+       caption = paste("*Datos sin normalizar", "**No se muestra Melilla", sep = "\n"),
+       subtitle = "Proyecto Microbioma Español",
+       fill = "") +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks =  element_blank(),
+    axis.title = element_blank(),
+    panel.border = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    plot.subtitle = element_text(size = 11, hjust = 0, color = "gray25"),
+    plot.caption = element_text(size = 10, hjust = 1, face = "italic")
+  )
+```
+
+The visualization it's much better now.
+
+Let's make it interactive.
+
+```{r}
+library(plotly)
+fig = ggplotly(p_map, width = 674*1.5, height = 426*1.5)
+
+htmlwidgets::saveWidget(fig, "richness.html")
+```
+
+### Shannon map
+
+Will use the data.frame without Melilla.
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+library(viridis)
+
+p_map = ggplot(data = no.melilla, aes(x = long, y = lat, group = group, fill = Shannon)) +
+  geom_polygon(color = "black", size = 0.2) +
+  theme_light() +
+  scale_fill_gradient(low = "honeydew1", high = "steelblue4") + 
+  labs(title = "Diversidad microbiana por Com. Autónoma (Shannon Index)",
+       caption = paste("*Datos sin normalizar", "**No se muestra Melilla", sep = "\n"),
+       subtitle = "Proyecto Microbioma Español",
+       fill = "") +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks =  element_blank(),
+    axis.title = element_blank(),
+    panel.border = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    plot.subtitle = element_text(size = 11, hjust = 0, color = "gray25"),
+    plot.caption = element_text(size = 10, hjust = 1, face = "italic")
+  )
+```
+
+Let's make it interactive.
+
+```{r}
+library(plotly)
+fig = ggplotly(p_map, width = 674*1.5, height = 426*1.5)
+
+htmlwidgets::saveWidget(fig, "./shannonNoNorm.html")
+```
+
+### WITH NORMALIZATION/RAREFACTION
+
+Now, I am going to rarefy the data to 15K seqs, just like I did for the alfa-diversity plots.
+
+We need to repeat the steps above, but now using the rarefied object for estimate richness. The rest will be the same.
+
+First, let's calculate de diversity metrics with the phyloseq::estimate_richness function.
+
+```{r}
+rich = estimate_richness(rarefy_even_depth(physeq1, sample.size = 15000, rngseed = 711))
+# Add a column with the sampleID but with no "X" (R puts this "X" automatically)
+rich$SampleID = substr(rownames(rich), 2, 20)
+# But this is not applicable to the 2 samples which ID starts with ME
+# Let's change these SampleIDs
+rich$SampleID[rich$SampleID == "E10670001415"] = "ME10670001415"
+rich$SampleID[rich$SampleID == "E10678455290"] = "ME10678455290"
+head(rich)
+```
+
+Now, let's add the metadata to the rich data.frame. We will merge the two objects
+
+```{r}
+rich_merged = merge(rich, data.frame(sample_data(physeq1)), by.x = "SampleID", by.y = "SampleName")
+head(rich_merged)
+```
+
+We're not interested in all the variables, but some. Let's select them.
+
+```{r}
+rich_merged = rich_merged[, c("Observed", "Chao1", "Shannon", "Simpson", "id", "Region")]
+head(rich_merged)
+```
+
+Let's calculate the average values per id (in other words: per Autonomous Region). Will use aggregate.
+
+```{r}
+x = aggregate(rich_merged[, 1:4], list(rich_merged$id, rich_merged$Region), mean)
+colnames(x)[c(1:2)] = c("id", "Region.check")
+x
+```
+
+I do not exactly why, but if Melilla is not in X, the merge is carried out in a wrong way and the resulting map figure it's not OK. So, let's cheat:
+
+```{r}
+x = rbind(x, c("19", "MELILLA", 1, 1, 1, 1))
+```
+
+Now let's merge the map with this last data.frame.
+
+```{r}
+alfa.map = mapa_df_fixed
+alfa.map = merge(mapa_df_fixed, x, by = "id")
+```
+
+Then remove Melilla as done before and convert the desired variables into numeric vectors.
+
+```{r}
+no.melilla = alfa.map[alfa.map$id != "19",]
+no.melilla$Observed = as.numeric(no.melilla$Observed)
+no.melilla$Shannon = as.numeric(no.melilla$Shannon)
+```
+
+### Richness map - Rarefied
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p_map = ggplot(data = no.melilla, aes(x = long, y = lat, group = group, fill = Observed)) +
+  geom_polygon(color = "black", size = 0.2) +
+  theme_light() +
+  scale_fill_gradient(low = "lightgoldenrod1", high = "indianred") + 
+  labs(title = "Riqueza microbiana por Com. Autónoma",
+       caption = paste("*Rarefacción: 15K seqs.", "*No se muestra Melilla", sep = "\n"),
+       subtitle = "Proyecto Microbioma Español",
+       fill = "") +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks =  element_blank(),
+    axis.title = element_blank(),
+    panel.border = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    plot.subtitle = element_text(size = 11, hjust = 0, color = "gray25"),
+    plot.caption = element_text(size = 10, hjust = 1, face = "italic")
+  )
+```
+
+The map it's OK now.
+
+Let's make it interactive.
+
+```{r}
+library(plotly)
+fig = ggplotly(p_map, width = 674*1.5, height = 426*1.5)
+
+htmlwidgets::saveWidget(fig, "richnessRarefied15K.html")
+```
+
+### Shannon map - Rarefied
+
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+library(viridis)
+
+p_map = ggplot(data = no.melilla, aes(x = long, y = lat, group = group, fill = Shannon)) +
+  geom_polygon(color = "black", size = 0.2) +
+  theme_light() +
+  scale_fill_gradient(low = "honeydew1", high = "steelblue4") + 
+  labs(title = "Diversidad microbiana por Com. Autónoma (Shannon Index)",
+       caption = paste("*Rarefacción: 15K seqs.", "**No se muestra Melilla", sep = "\n"),
+       subtitle = "Proyecto Microbioma Español",
+       fill = "") +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks =  element_blank(),
+    axis.title = element_blank(),
+    panel.border = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    plot.subtitle = element_text(size = 11, hjust = 0, color = "gray25"),
+    plot.caption = element_text(size = 10, hjust = 1, face = "italic")
+  )
+```
+
+Let's make it interactive.
+
+```{r}
+library(plotly)
+fig = ggplotly(p_map, width = 674*1.5, height = 426*1.5)
+
+htmlwidgets::saveWidget(fig, "./shannonRarefied15K.html")
+```
+
+# Lactobacillus
+
+Until now, the Spanish microbiome seems to be homogenous for the different studied groups and for the top taxa. Of course, we haven't performed yet any statistical analysis (we're still in the exploratory analysis). Nevertheless, I think it could be interesting invenstigating the distribution of some of the most important taxa in the gut microbiota, even when they're not top-abundance taxa. These microbes may present a higher variability.
+
+Let's start with Lactobacillus. I'm going to use the phyloseq object collapsed at the genus level (proportions).
+
+1st step is to subset Lactobacillus
+
+```{r}
+lacto = subset_taxa(physeq_R6_rel, Rank6=="g__Lactobacillus")
+lacto
+```
+
+2nd: summarize
+
+```{r}
+summary(matrix(otu_table(lacto)))
+```
+
+The distribution is clearly biased, with more than half of the sample with no Lactobacillus.
+
+How many samples contain some Lactobacillus?
+
+```{r}
+table(matrix(otu_table(lacto)[,] > 0))
+```
+
+Only 188 samples contain Lactobacillus.
+
+3rd. Calculate average values per Region.
+
+Create a data.frame object
+
+```{r}
+lacto.df = data.frame(sample_data(lacto), matrix(otu_table(lacto)))
+colnames(lacto.df)[length(colnames(lacto.df))] = "Abundance"
+```
+
+Now, do the calculation:
+
+```{r}
+x = aggregate(lacto.df[, 7], list(lacto.df$id, lacto.df$Region), mean)
+colnames(x)[] = c("id", "Region.check", "Abundance")
+x
+```
+
+Merge with the map
+
+```{r}
+lacto.map = mapa_df_fixed
+lacto.map = merge(lacto.map, x, by = "id")
+```
+
+Then remove Melilla as done before and convert the desired variables into numeric vectors.
+
+```{r}
+no.melilla = lacto.map[lacto.map$id != "19",]
+```
+
+## Lactobacillus map - Relative Abundance
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p_map = ggplot(data = no.melilla, aes(x = long, y = lat, group = group, fill = Abundance)) +
+  geom_polygon(color = "black", size = 0.2) +
+  theme_light() +
+  scale_fill_gradient(low = "azure1", high = "cadetblue") + 
+  labs(title = "Abundancia Relativa de Lactobacillus por Com. Autónoma",
+       caption = paste("*342 muestras no presentan Lactobacillus", "*No se muestra Melilla", sep = "\n"),
+       subtitle = "Proyecto Microbioma Español",
+       fill = "") +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks =  element_blank(),
+    axis.title = element_blank(),
+    panel.border = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    plot.subtitle = element_text(size = 11, hjust = 0, color = "gray25"),
+    plot.caption = element_text(size = 10, hjust = 1, face = "italic")
+  )
+```
+
+## Lactobacillus by Gender
+
+Let's study these keyplayers by some other variables (Age & Gender)
+
+1st: How many males/females have *Lactobacillus* in their gut.
+
+```{r}
+summary(lacto.df[lacto.df$Abundance > 0, "Gender"])
+```
+
+Little bit more woman than man.
+
+2nd: plot the distribution.
+
+*Only taking into account the individuals which had some Lactobacillus
+
+It's necessary to perform a log10 transformation in the y axis, since the distribution is skewed to 0.
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p = ggplot(data = lacto.df[lacto.df$Abundance > 0,], aes(x = Gender, y = Abundance, fill = Gender)) +
+  scale_y_continuous(trans='log10') +
+  geom_violin(alpha = 0.7, color = "gray35") +
+  geom_boxplot(alpha = 0.7, color = "gray55", fill = NA, notch = TRUE) + 
+  stat_summary(fun=mean, geom="point", shape=18, size=3, color="gray35", fill="gray35", alpha = 0.7) + 
+  xlab("") + ylab ("Abundancia relativa*") +
+  scale_fill_brewer(palette = "Blues") +
+  theme_light() +
+  
+  theme (
+    legend.position = "top",
+    axis.text.x = element_text(size = 11),
+    axis.title.y = element_text(size = 12),
+    plot.subtitle = element_text(size = 11, hjust = 0, color = "gray25"),
+    plot.caption = element_text(size = 10, hjust = 1, face = "italic")
+  ) +
+  
+  labs(title = "Abundancia Relativa de Lactobacillus por Sexo",
+       caption = paste("*Eje y en log10", "**Solo se consideran las muestras que contienen Lactobacillus", sep = "\n"),
+       subtitle = "Proyecto Microbioma Español",
+       fill = "")
+p
+```
+
+Let's try another graph (density plot)
+
+Calculate mean values:
+
+```{r}
+library(plyr)
+mu <- ddply(lacto.df[lacto.df$Abundance > 0,], "Gender", summarise, grp.mean=median(Abundance))
+head(mu)
+```
+
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p = ggplot(data = lacto.df[lacto.df$Abundance > 0,], aes(x = Abundance, fill = Gender, color = Gender)) +
+  scale_x_continuous(trans='log10') +
+  geom_density(alpha = 0.7) +
+  geom_vline(data=mu, aes(xintercept=grp.mean, color=Gender),
+             linetype="dashed") +
+  ylab("Densidad") + xlab ("*Abundancia relativa") +
+  scale_fill_brewer(palette = "Blues") +
+  scale_color_brewer(palette = "Blues") +
+  theme_light() +
+  
+  theme (
+    legend.position = "top",
+    axis.text.x = element_text(size = 11),
+    axis.title.y = element_text(size = 12),
+    plot.subtitle = element_text(size = 11, hjust = 0, color = "gray25"),
+    plot.caption = element_text(size = 10, hjust = 1, face = "italic")
+  ) +
+  
+  labs(title = "Abundancia Relativa de Lactobacillus por Sexo",
+       caption = paste("*Eje x en log10", "**Las líneas punteadas muestran la mediana", "***Solo se consideran las muestras que contienen Lactobacillus", sep = "\n"),
+       subtitle = "Proyecto Microbioma Español",
+       fill = "")
+p
+```
+
+
+
+## Lactobacillus by Age range
+
+1st: How many individuals have *Lactobacillus* in their gut grouped by Age Range.
+
+```{r}
+summary(lacto.df[lacto.df$Abundance > 0, "Age.range"])
+```
+
+Well I don't see a clear pattern. It has to be taken into account that there are more individuals in the middle age range.
+
+2nd: Let's look at the abundances.
+
+Again, I'll use log10 y axis and only take into account individuals that had Lactobacillus.
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p = ggplot(data = lacto.df[lacto.df$Abundance > 0,], aes(x = Age.range,
+                                                         y = Abundance, fill = Age.range)) +
+  scale_y_continuous(trans='log10') +
+  geom_boxplot(alpha = 0.5, color = "gray55", notch = TRUE) + 
+  stat_summary(fun=mean, geom="point", shape=18, size=3, color="gray35", fill="gray35", alpha = 0.7) + 
+  xlab("") + ylab ("Abundancia relativa*") +
+  scale_fill_brewer(palette = "Blues") +
+  theme_light() +
+  
+  theme (
+    legend.position = "top",
+    axis.text.x = element_text(size = 11),
+    axis.title.y = element_text(size = 12),
+    plot.subtitle = element_text(size = 11, hjust = 0, color = "gray25"),
+    plot.caption = element_text(size = 10, hjust = 1, face = "italic")
+  ) +
+  
+  labs(title = "Abundancia Relativa de Lactobacillus por Edad",
+       caption = paste("*Eje y en log10", "**Solo se consideran las muestras que contienen Lactobacillus", sep = "\n"),
+       subtitle = "Proyecto Microbioma Español",
+       fill = "")
+p
+```
+
+
+# Bifidobacterium
+
+1st step is to subset Bifidobacterium (but I'll use the same object's name just for convenience)
+
+```{r}
+lacto = subset_taxa(physeq_R6_rel, Rank6=="g__Bifidobacterium")
+lacto
+```
+
+2nd: summarize Bifidobacterium
+
+```{r}
+summary(matrix(otu_table(lacto)))
+```
+
+The distribution is also clearly biased, but not as much as the Lactobacillus one.
+
+How many samples contain some Bifidobacterium?
+
+```{r}
+table(matrix(otu_table(lacto)[,] > 0))
+```
+
+Only 456 samples contain Lactobacillus.
+
+3rd. Calculate average values per Region.
+
+Create a data.frame object
+
+```{r}
+lacto.df = data.frame(sample_data(lacto), matrix(otu_table(lacto)))
+colnames(lacto.df)[length(colnames(lacto.df))] = "Abundance"
+```
+
+Now, do the calculation:
+
+```{r}
+x = aggregate(lacto.df[, 7], list(lacto.df$id, lacto.df$Region), mean)
+colnames(x)[] = c("id", "Region.check", "Abundance")
+x
+```
+
+Merge with the map
+
+```{r}
+lacto.map = mapa_df_fixed
+lacto.map = merge(lacto.map, x, by = "id")
+```
+
+Then remove Melilla (outlier) as done before and convert the desired variables into numeric vectors.
+
+```{r}
+no.melilla = lacto.map[lacto.map$id != "19",]
+```
+
+## Bifidobacterium map - Relative Abundance
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p_map = ggplot(data = no.melilla, aes(x = long, y = lat, group = group, fill = Abundance)) +
+  geom_polygon(color = "black", size = 0.2) +
+  theme_light() +
+  scale_fill_gradient(low = "#efffeb", high = "palegreen4") + 
+  labs(title = "Abundancia Relativa de Bifidobacterium por Com. Autónoma",
+       caption = paste("*74 muestras no presentan Bifidobacterium", "*No se muestra Melilla", sep = "\n"),
+       subtitle = "Proyecto Microbioma Español",
+       fill = "") +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks =  element_blank(),
+    axis.title = element_blank(),
+    panel.border = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    plot.subtitle = element_text(size = 11, hjust = 0, color = "gray25"),
+    plot.caption = element_text(size = 10, hjust = 1, face = "italic")
+  )
+```
+
+## Bifidobacterium by Gender
+
+1st: How many males/females have *Bifidobacterium* in their gut.
+
+```{r}
+summary(lacto.df[lacto.df$Abundance > 0, "Gender"])
+```
+
+Little bit more for women than for men.
+
+2nd: plot the distribution.
+
+*Only taking into account the individuals which had some Bifidobacterium
+
+It's necessary to perform a log10 transformation in the y axis, since the distribution is skewed to 0.
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p = ggplot(data = lacto.df[lacto.df$Abundance > 0,], aes(x = Gender, y = Abundance, fill = Gender)) +
+  scale_y_continuous(trans='log10') +
+  geom_violin(alpha = 0.7, color = "gray35") +
+  geom_boxplot(alpha = 0.7, color = "gray55", fill = NA, notch = TRUE) + 
+  stat_summary(fun=mean, geom="point", shape=18, size=3, color="gray35", fill="gray35", alpha = 0.7) + 
+  xlab("") + ylab ("Abundancia relativa*") +
+  scale_fill_brewer(palette = "Greens") +
+  theme_light() +
+  
+  theme (
+    legend.position = "top",
+    axis.text.x = element_text(size = 11),
+    axis.title.y = element_text(size = 12),
+    plot.subtitle = element_text(size = 11, hjust = 0, color = "gray25"),
+    plot.caption = element_text(size = 10, hjust = 1, face = "italic")
+  ) +
+  
+  labs(title = "Abundancia Relativa de Bifidobacterium por Sexo",
+       caption = paste("*Eje y en log10", "**Solo se consideran las muestras que contienen Bifidobacterium", sep = "\n"),
+       subtitle = "Proyecto Microbioma Español",
+       fill = "")
+p
+```
+
+Let's try another graph (density plot)
+
+Calculate mean values:
+
+```{r}
+library(plyr)
+mu <- ddply(lacto.df[lacto.df$Abundance > 0,], "Gender", summarise, grp.mean=median(Abundance))
+head(mu)
+```
+
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p = ggplot(data = lacto.df[lacto.df$Abundance > 0,], aes(x = Abundance, fill = Gender, color = Gender)) +
+  scale_x_continuous(trans='log10') +
+  geom_density(alpha = 0.6) +
+  geom_vline(data=mu, aes(xintercept=grp.mean, color=Gender),
+             linetype="dashed") +
+  ylab("Densidad") + xlab ("*Abundancia relativa") +
+  scale_fill_brewer(palette = "Greens") +
+  scale_color_brewer(palette = "Greens") +
+  theme_light() +
+  
+  theme (
+    legend.position = "top",
+    axis.text.x = element_text(size = 11),
+    axis.title.y = element_text(size = 12),
+    plot.subtitle = element_text(size = 11, hjust = 0, color = "gray25"),
+    plot.caption = element_text(size = 10, hjust = 1, face = "italic")
+  ) +
+  
+  labs(title = "Abundancia Relativa de Bifidobacterium por Sexo",
+       caption = paste("*Eje x en log10", "**Las líneas punteadas muestran la mediana", "***Solo se consideran las muestras que contienen Bifidobacterium", sep = "\n"),
+       subtitle = "Proyecto Microbioma Español",
+       fill = "")
+p
+```
+
+
+## Bifidobacterium by Age range
+
+1st: How many individuals have *Bifidobacterium* in their gut grouped by Age Range.
+
+```{r}
+summary(lacto.df[lacto.df$Abundance > 0, "Age.range"])
+```
+
+Well I don't see a clear pattern. It has to be taken into account that there are more individuals in the middle age range.
+
+2nd: Let's look at the abundances.
+
+Again, I'll use log10 y axis and only take into account individuals that had Bifidobacterium
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p = ggplot(data = lacto.df[lacto.df$Abundance > 0,], aes(x = Age.range,
+                                                         y = Abundance, fill = Age.range)) +
+  scale_y_continuous(trans='log10') +
+  geom_boxplot(alpha = 0.5, color = "gray55", notch = TRUE) + 
+  stat_summary(fun=mean, geom="point", shape=18, size=3, color="gray35", fill="gray35", alpha = 0.7) + 
+  xlab("") + ylab ("Abundancia relativa*") +
+  scale_fill_brewer(palette = "Greens") +
+  theme_light() +
+  
+  theme (
+    legend.position = "top",
+    axis.text.x = element_text(size = 11),
+    axis.title.y = element_text(size = 12),
+    plot.subtitle = element_text(size = 11, hjust = 0, color = "gray25"),
+    plot.caption = element_text(size = 10, hjust = 1, face = "italic")
+  ) +
+  
+  labs(title = "Abundancia Relativa de Bifidobacterium por Edad",
+       caption = paste("*Eje y en log10", "**Solo se consideran las muestras que contienen Bifidobacterium", sep = "\n"),
+       subtitle = "Proyecto Microbioma Español",
+       fill = "")
+p
+```
+
+# Akkermansia
+
+1st step is to subset Akkermansia (but I'll use the same object's name just for convenience)
+
+```{r}
+lacto = subset_taxa(physeq_R6_rel, Rank6=="g__Akkermansia")
+lacto
+```
+
+2nd: summarize Akkermansia
+
+```{r}
+summary(matrix(otu_table(lacto)))
+```
+
+The distribution is also clearly biased, with more than half of the sample with no Akkermansia
+
+How many samples contain some Bifidobacterium?
+
+```{r}
+table(matrix(otu_table(lacto)[,] > 0))
+```
+
+Only 347 samples contain Akkermansia.
+
+3rd. Calculate average values per Region.
+
+Create a data.frame object
+
+```{r}
+lacto.df = data.frame(sample_data(lacto), matrix(otu_table(lacto)))
+colnames(lacto.df)[length(colnames(lacto.df))] = "Abundance"
+```
+
+Now, do the calculation:
+
+```{r}
+x = aggregate(lacto.df[, 7], list(lacto.df$id, lacto.df$Region), mean)
+colnames(x)[] = c("id", "Region.check", "Abundance")
+x
+```
+
+Merge with the map
+
+```{r}
+lacto.map = mapa_df_fixed
+lacto.map = merge(lacto.map, x, by = "id")
+```
+
+Then remove Melilla (outlier) as done before and convert the desired variables into numeric vectors.
+
+```{r}
+no.melilla = lacto.map[lacto.map$id != "19",]
+```
+
+## Akkermansia map - Relative Abundance
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p_map = ggplot(data = no.melilla, aes(x = long, y = lat, group = group, fill = Abundance)) +
+  geom_polygon(color = "black", size = 0.2) +
+  theme_light() +
+  scale_fill_gradient(low = "#f3f5d6", high = "#acb23c") + 
+  labs(title = "Abundancia Relativa de Akkermansia por Com. Autónoma",
+       caption = paste("*183 muestras no presentan Akkermansia", "*No se muestra Melilla", sep = "\n"),
+       subtitle = "Proyecto Microbioma Español",
+       fill = "") +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks =  element_blank(),
+    axis.title = element_blank(),
+    panel.border = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    plot.subtitle = element_text(size = 11, hjust = 0, color = "gray25"),
+    plot.caption = element_text(size = 10, hjust = 1, face = "italic")
+  )
+```
+
+## Akkermansia by Gender
+
+1st: How many males/females have *Akkermansia* in their gut.
+
+```{r}
+summary(lacto.df[lacto.df$Abundance > 0, "Gender"])
+```
+
+Little bit more for women than for men.
+
+2nd: plot the distribution.
+
+*Only taking into account the individuals which had some Akkermansia
+
+It's necessary to perform a log10 transformation in the y axis, since the distribution is skewed to 0.
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p = ggplot(data = lacto.df[lacto.df$Abundance > 0,], aes(x = Gender, y = Abundance, fill = Gender)) +
+  scale_y_continuous(trans='log10') +
+  geom_violin(alpha = 0.7, color = "gray35") +
+  geom_boxplot(alpha = 0.7, color = "gray55", fill = NA, notch = TRUE) + 
+  stat_summary(fun=mean, geom="point", shape=18, size=3, color="gray35", fill="gray35", alpha = 0.7) + 
+  xlab("") + ylab ("Abundancia relativa*") +
+  scale_fill_brewer(palette = "YlOrBr") +
+  theme_light() +
+  
+  theme (
+    legend.position = "top",
+    axis.text.x = element_text(size = 11),
+    axis.title.y = element_text(size = 12),
+    plot.subtitle = element_text(size = 11, hjust = 0, color = "gray25"),
+    plot.caption = element_text(size = 10, hjust = 1, face = "italic")
+  ) +
+  
+  labs(title = "Abundancia Relativa de Akkermansia por Sexo",
+       caption = paste("*Eje y en log10", "**Solo se consideran las muestras que contienen Akkermansia", sep = "\n"),
+       subtitle = "Proyecto Microbioma Español",
+       fill = "")
+p
+```
+
+**Density plot**
+
+```{r}
+library(plyr)
+mu <- ddply(lacto.df[lacto.df$Abundance > 0,], "Gender", summarise, grp.mean=median(Abundance))
+head(mu)
+```
+
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p = ggplot(data = lacto.df[lacto.df$Abundance > 0,], aes(x = Abundance, fill = Gender, color = Gender)) +
+  scale_x_continuous(trans='log10') +
+  geom_density(alpha = 0.7) +
+  geom_vline(data=mu, aes(xintercept=grp.mean, color=Gender),
+             linetype="dashed") +
+  ylab("Densidad") + xlab ("*Abundancia relativa") +
+  scale_fill_brewer(palette = "YlOrBr", direction = -1) +
+  scale_color_brewer(palette = "YlOrBr", direction = -1) +
+  theme_light() +
+  
+  theme (
+    legend.position = "top",
+    axis.text.x = element_text(size = 11),
+    axis.title.y = element_text(size = 12),
+    plot.subtitle = element_text(size = 11, hjust = 0, color = "gray25"),
+    plot.caption = element_text(size = 10, hjust = 1, face = "italic")
+  ) +
+  
+  labs(title = "Abundancia Relativa de Akkermansia por Sexo",
+       caption = paste("*Eje x en log10", "**Las líneas punteadas muestran la mediana", "***Solo se consideran las muestras que contienen Akkermansia", sep = "\n"),
+       subtitle = "Proyecto Microbioma Español",
+       fill = "")
+p
+```
+
+
+## Akkermansia by Age range
+
+1st: How many individuals have *Akkermansia* in their gut grouped by Age Range.
+
+```{r}
+summary(lacto.df[lacto.df$Abundance > 0, "Age.range"])
+```
+
+It looks like some kind of normal distribution.
+
+2nd: Let's look at the abundances.
+
+Again, I'll use log10 y axis and only take into account individuals that had Akkermansia
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p = ggplot(data = lacto.df[lacto.df$Abundance > 0,], aes(x = Age.range,
+                                                         y = Abundance, fill = Age.range)) +
+  scale_y_continuous(trans='log10') +
+  geom_boxplot(alpha = 0.5, color = "gray55", notch = TRUE) + 
+  stat_summary(fun=mean, geom="point", shape=18, size=3, color="gray35", fill="gray35", alpha = 0.7) + 
+  xlab("") + ylab ("Abundancia relativa*") +
+  scale_fill_brewer(palette = "YlOrBr") +
+  theme_light() +
+  
+  theme (
+    legend.position = "top",
+    axis.text.x = element_text(size = 11),
+    axis.title.y = element_text(size = 12),
+    plot.subtitle = element_text(size = 11, hjust = 0, color = "gray25"),
+    plot.caption = element_text(size = 10, hjust = 1, face = "italic")
+  ) +
+  
+  labs(title = "Abundancia Relativa de Akkermansia por Edad",
+       caption = paste("*Eje y en log10", "**Solo se consideran las muestras que contienen Akkermansia", sep = "\n"),
+       subtitle = "Proyecto Microbioma Español",
+       fill = "")
+p
+```
+
+# DESeq2: Differential abundance analysis
+
+## Genus - by Gender
+
+Female = control level.
+
+This code will convert the phyloseq object into a DESeq2 object and then perform the DESeq test.
+
+```{r results=FALSE, warning=FALSE, echo = FALSE, message=FALSE}
+library(DESeq2)
+sample_data(physeq_R6)$Gender = relevel(sample_data(physeq_R6)$Gender, "Female")
+# TRASFORMATION TO DESeq2
+diagdds = phyloseq_to_deseq2(physeq_R6, ~Gender)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+
+Ahora ordenamos por el p-valor, eliminamos los valores NA y formateamos el resultado. El resultado es la siguiente tabla:
+
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.05
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(physeq_R6)[rownames(sigtab), ], "matrix"))
+sigtab
+write.table(sigtab, "./Deseq2-Tables/MaleVsFemale.csv", sep = ",",row.names = FALSE)
+```
+
+## Genus - Mediterranean vs Rest of Peninsula
+
+Subset the data:
+
+```{r}
+set = subset_samples(physeq_R6, Area == "Mediterranean" | Area == "Rest")
+# Summary sample's info
+summary(sample_data(set)[,"Area"])
+```
+ 
+ It's well balanced, so do the test
+ 
+```{r}
+library(DESeq2)
+sample_data(set)$Area = relevel(sample_data(set)$Area, "Mediterranean")
+# TRASFORMATION TO DESeq2
+diagdds = phyloseq_to_deseq2(set, ~Area)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+
+And write the results
+
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.05
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(set)[rownames(sigtab), ], "matrix"))
+```
+
+No significant results found.
+
+## Genera - Islands vs Peninsula
+
+Create the variable Area2 (Island vs. Peninsula)
+
+```{r}
+island = sample_data(physeq_R6)$Area == "Island"
+island[island] = "Island"
+island[island == "FALSE"] = "Peninsula"
+sample_data(physeq_R6)$Area2 = as.factor(island)
+summary(sample_data(physeq_R6)$Area2)
+```
+
+And now do the test (maybe we should balance the sample)
+
+```{r results=FALSE, warning=FALSE, echo = FALSE, message=FALSE}
+library(DESeq2)
+sample_data(physeq_R6)$Area2 = relevel(sample_data(physeq_R6)$Area2, "Island")
+# TRASFORMATION TO DESeq2
+diagdds = phyloseq_to_deseq2(physeq_R6, ~Area2)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+
+Sort by p-value, remove NA values and give format to the result.
+
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.05
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(physeq_R6)[rownames(sigtab), ], "matrix"))
+sigtab
+write.table(sigtab, "./Deseq2-Tables/IslandVSPeninsula.csv", sep = ",",row.names = FALSE)
+```
+
+## Genera - Canary Islands (Africa) vs Peninsula
+
+Create the variable Area2 (Island vs. Peninsula)
+
+```{r}
+island = sample_data(physeq_R6)$Region == "CANARIAS"
+island[island] = "Island"
+island[island == "FALSE"] = "Peninsula"
+sample_data(physeq_R6)$Area3 = as.factor(island)
+summary(sample_data(physeq_R6)$Area3)
+```
+
+And now do the test (maybe we should balance the sample)
+
+```{r results=FALSE, warning=FALSE, echo = FALSE, message=FALSE}
+library(DESeq2)
+sample_data(physeq_R6)$Area2 = relevel(sample_data(physeq_R6)$Area3, "Island")
+# TRASFORMATION TO DESeq2
+diagdds = phyloseq_to_deseq2(physeq_R6, ~Area2)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+
+
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.05
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(physeq_R6)[rownames(sigtab), ], "matrix"))
+sigtab
+write.table(sigtab, "./Deseq2-Tables/CanaryVSRest.csv", sep = ",",row.names = FALSE)
+```
+
+## Phylum - by Gender
+
+```{r results=FALSE, warning=FALSE, echo = FALSE, message=FALSE}
+library(DESeq2)
+sample_data(physeq_R2)$Gender = relevel(sample_data(physeq_R2)$Gender, "Female")
+# TRASFORMATION TO DESeq2
+diagdds = phyloseq_to_deseq2(physeq_R2, ~Gender)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+
+
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.05
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(physeq_R2)[rownames(sigtab), c(1:2)], "matrix"))
+sigtab
+write.table(sigtab, "./Deseq2-Tables/MaleVsFemale-phylum.csv", sep = ",",row.names = FALSE)
+```
+
+# Phylum - Mediterranean vs Rest of Peninsula
+
+Subset the data:
+
+```{r}
+set = subset_samples(physeq_R2, Area == "Mediterranean" | Area == "Rest")
+# Summary sample's info
+summary(sample_data(set)[,"Area"])
+```
+ 
+ It's well balanced, so do the test
+ 
+```{r}
+library(DESeq2)
+sample_data(set)$Area = relevel(sample_data(set)$Area, "Mediterranean")
+# TRASFORMATION TO DESeq2
+diagdds = phyloseq_to_deseq2(set, ~Area)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+
+And write the results
+
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.05
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(set)[rownames(sigtab), ], "matrix"))
+```
+
+No significant differences found.
+
+# Phylum - Islands vs Peninsula
+
+```{r}
+island = sample_data(physeq_R2)$Area == "Island"
+island[island] = "Island"
+island[island == "FALSE"] = "Peninsula"
+sample_data(physeq_R2)$Area2 = as.factor(island)
+summary(sample_data(physeq_R2)$Area2)
+```
+
+And now do the test (maybe we should balance the sample)
+
+```{r results=FALSE, warning=FALSE, echo = FALSE, message=FALSE}
+library(DESeq2)
+sample_data(physeq_R2)$Area2 = relevel(sample_data(physeq_R2)$Area2, "Island")
+# TRASFORMATION TO DESeq2
+diagdds = phyloseq_to_deseq2(physeq_R2, ~Area2)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.05
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(physeq_R2)[rownames(sigtab), c(1:2)], "matrix"))
+sigtab
+write.table(sigtab, "./Deseq2-Tables/IslandVSPeninsula-phylum.csv", sep = ",",row.names = FALSE)
+```
+
+# COVARIABLES
+
+Let's investigate the effect of other variables. These variables have been stored in validos_R_3.0.csv.
+
+## Metadata
+
+```{r MetadataLoading}
+# METADATA
+mapfile = read.csv("./full-metadata.csv", header = TRUE, sep=",",
+                   colClasses=c("ID"="character"))
+samples = mapfile[,1]
+rownames(mapfile) = samples
+mapfile = mapfile[,2:length(colnames(mapfile))]
+# Change the row order to match the physeq's order
+ord = match(colnames(otu_table(physeqObjest)), rownames(mapfile))
+mapfile = mapfile[ord,]
+sampledata = sample_data(mapfile)
+
+physeqCov = merge_phyloseq(physeqObjest, sampledata)
+physeqCov
+```
+
+##  Variable modification
+### BMI Calculation
+
+```{r IMCcalculation}
+sample_data(physeqCov)[,"IMC"] = sample_data(physeqCov)[,"Peso"]/(sample_data(physeqCov)[,"Estatura"]^2)
+```
+
+### Age calculation
+
+```{r}
+sample_data(physeqCov)$Fecha.Recepcion = as.Date(sample_data(physeqCov)$Fecha.Recepcion, format = "%d/%m/%Y")
+
+sample_data(physeqCov)$Fecha.Nacimiento = as.Date(sample_data(physeqCov)$Fecha.Nacimiento, format = "%d/%m/%Y")
+```
+
+Now, we can create a new variable that includes the age in float.
+
+```{r}
+sample_data(physeqCov)$Edad = as.double(difftime(sample_data(physeqCov)$Fecha.Recepcion,
+          sample_data(physeqCov)$Fecha.Nacimiento, "days") / 365.6)
+```
+
+## Metadata summary
+
+```{r CovariablesSummary}
+sink("summary.txt")
+tosum = data.frame(sample_data(physeqCov)$Edad, sample_data(physeqCov)$Gender, sample_data(physeqCov)$IMC, sample_data(physeqCov)$Region)
+colnames(tosum) = c("Age", "Sex", "BMI", "Region")
+print(summary(tosum, maxsum = 20))
+sink()
+```
+
+## Data filtering
+
+We'll do it as [Valles-Colomer *et al.* (2019)](https://darwinteam-my.sharepoint.com/:b:/g/personal/alatorre_darwinteam_onmicrosoft_com/ETSgnDakGstOtEu_jeWHb1kBYRJfXB4qmAmS1t2JiEK9rA?e=RcqJTt.
+
+However, we will use **0.01**, since there are a lot of taxa that pass the 0.001 filter.
+
+### ASVs
+
+Caluclate relative abundances
+
+```{r relativize}
+physeqCov_rel = transform_sample_counts(physeqCov, function(x) x / sum(x)*100 )
+```
+
+And check the number of taxa passing the threshold.
+
+```{r}
+filt_tax = filter_taxa(physeqCov_rel, function(x) mean(x) > 0.01)
+```
+
+Filter the original object (with absolute abundances)
+
+```{r}
+f_physeqCov = prune_taxa(filt_tax, physeqCov)
+f_physeqCov
+```
+
+Having this large number, I think we should avoid using ASVs.
+
+### Genera
+
+Collapse and relativize
+
+```{r}
+physeqCov_R6 <- tax_glom(physeqCov, taxrank = rank_names(physeqCov)[6], NArm = FALSE)
+physeqCov_R6_rel  = transform_sample_counts(physeqCov_R6, function(x) x / sum(x)*100 )
+```
+
+Now let's see which genera are below the threshold (0.01)
+
+```{r}
+filt_tax = filter_taxa(physeqCov_R6_rel, function(x) mean(x) > 0.01)
+```
+
+And now we filter this taxa out from the collapsed (absolute) object. We need absolute data for DESeq2!
+
+```{r}
+f_physeqCov_R6 = prune_taxa(filt_tax, physeqCov_R6)
+f_physeqCov_R6
+```
+
+And now, we relativize again (for Pearson correlation)
+
+```{r}
+f_physeqCov_R6_rel  = transform_sample_counts(f_physeqCov_R6, function(x) x / sum(x)*100 )
+```
+
+
+### Phylum
+
+Collapse and relativize
+
+```{r}
+physeqCov_R2 <- tax_glom(physeqCov, taxrank = rank_names(physeqCov)[2], NArm = FALSE)
+physeqCov_R2_rel  = transform_sample_counts(physeqCov_R2, function(x) x / sum(x)*100 )
+```
+
+As we only have 21 taxa, I will not filter anything out from the phylum object.
+
+## TESTING CONTINUOS VARIABLES
+
+### Genera vs BMI
+
+We have to program a loop for iteratively testing each genus.
+
+This will be the regular test for one taxa. Note that all the as.vector() & as.matrix() stuff is just to convert the phyloseq object into a vector (i know its a little bit tricky).
+
+```{r}
+r = cor.test(as.vector(otu_table(f_physeqCov_R6_rel)[1,]),
+         as.vector(as.matrix(sample_data(f_physeqCov_R6_rel)[, "IMC"])),  method = "spearman")
+r
+```
+
+Now, we can try to program the loop and return the results for all the genera (171).
+
+P-values will be corrected by Benjamini-Hockberg method, and alpha's been set to 0.05.
+
+```{r}
+# For storing each otu tested
+otus = c()
+# For storing each p.value retrieved
+p.values = c()
+# For storing rho values
+rhos = c()
+for (otu in rownames(otu_table(f_physeqCov_R6_rel)))
+{
+otus = c(otus, otu)
+# Do the calculation
+r = cor.test(as.vector(otu_table(f_physeqCov_R6_rel)[otu,]),
+         as.vector(as.matrix(sample_data(f_physeqCov_R6_rel)[, "IMC"])),  method = "spearman")
+# Store the value of this round
+p.values = c(p.values, r$p.value)
+rhos = c(rhos, r$estimate)
+}
+
+# Create a data.frame for summarizing results and add the corrected p.values (Benjamini-Hochberg)
+res = data.frame(otus, p.values, rhos, p.adjust(p.values, method = "BH"))
+colnames(res) = c("OTU.id", "p.value", "rho", "p.adj")
+
+# Remove non-significant taxa
+sig = res[res$p.adj < 0.05, ]
+
+# And add taxonomy to the table
+sig = cbind(as(tax_table(f_physeqCov_R6_rel)[sig$OTU.id, ], "matrix"), as(sig, "data.frame"))
+
+# And add mean abundance
+sig$MeanAbund = rowMeans(as.matrix(otu_table(f_physeqCov_R6_rel)[sig$OTU.id,]))
+```
+
+Print the results now to avoid the messages from cor.test.
+
+```{r}
+sig
+write.table(sig, "./Spearman-Tables/Genus-vs-IMC.csv", sep = ",",row.names = FALSE)
+```
+
+### Genera vs Age
+
+For calculating Age we have 2 different variables: date of birth and date of recepction of the sample. If we make de diff between these to dates we will obtain the exact date that each participant had when they donated their sample.
+
+First we need to read those variables as dates.
+
+```{r}
+sample_data(f_physeqCov_R6_rel)$Fecha.Recepcion = as.Date(sample_data(f_physeqCov_R6_rel)$Fecha.Recepcion, format = "%d/%m/%Y")
+
+sample_data(f_physeqCov_R6_rel)$Fecha.Nacimiento = as.Date(sample_data(f_physeqCov_R6_rel)$Fecha.Nacimiento, format = "%d/%m/%Y")
+```
+
+Now, we can create a new variable that includes the age in float.
+
+```{r}
+sample_data(f_physeqCov_R6_rel)$Edad = as.double(difftime(sample_data(f_physeqCov_R6_rel)$Fecha.Recepcion,
+          sample_data(f_physeqCov_R6_rel)$Fecha.Nacimiento, "days") / 365.6)
+```
+
+And now, we can perform the calculations
+
+```{r}
+# For storing each otu tested
+otus = c()
+# For storing each p.value retrieved
+p.values = c()
+# For storing rho values
+rhos = c()
+for (otu in rownames(otu_table(f_physeqCov_R6_rel)))
+{
+otus = c(otus, otu)
+# Do the calculation
+r = cor.test(as.vector(otu_table(f_physeqCov_R6_rel)[otu,]),
+         as.vector(as.matrix(sample_data(f_physeqCov_R6_rel)[, "Edad"])),  method = "spearman")
+# Store the value of this round
+p.values = c(p.values, r$p.value)
+rhos = c(rhos, r$estimate)
+}
+
+# Create a data.frame for summarizing results and add the corrected p.values (Benjamini-Hochberg)
+res = data.frame(otus, p.values, rhos, p.adjust(p.values, method = "BH"))
+colnames(res) = c("OTU.id", "p.value", "rho", "p.adj")
+
+# Remove non-significant taxa
+sig = res[res$p.adj < 0.05, ]
+
+# And add taxonomy to the table
+sig = cbind(as(tax_table(f_physeqCov_R6_rel)[sig$OTU.id, ], "matrix"), as(sig, "data.frame"))
+
+# And add mean abundance
+sig$MeanAbund = rowMeans(as.matrix(otu_table(f_physeqCov_R6_rel)[sig$OTU.id,]))
+```
+
+
+```{r}
+sig
+write.table(sig, "./Spearman-Tables/Genus-vs-Age.csv", sep = ",",row.names = FALSE)
+```
+
+### Genera vs Milk intake
+
+Let's do de same for milk intake (per month).
+
+```{r}
+# For storing each otu tested
+otus = c()
+# For storing each p.value retrieved
+p.values = c()
+# For storing rho values
+rhos = c()
+for (otu in rownames(otu_table(f_physeqCov_R6_rel)))
+{
+otus = c(otus, otu)
+# Do the calculation
+r = cor.test(as.vector(otu_table(f_physeqCov_R6_rel)[otu,]),
+         as.vector(as.matrix(sample_data(f_physeqCov_R6_rel)[, "Leche.Mes"])),  method = "spearman")
+# Store the value of this round
+p.values = c(p.values, r$p.value)
+rhos = c(rhos, r$estimate)
+}
+
+# Create a data.frame for summarizing results and add the corrected p.values (Benjamini-Hochberg)
+res = data.frame(otus, p.values, rhos, p.adjust(p.values, method = "BH"))
+colnames(res) = c("OTU.id", "p.value", "rho", "p.adj")
+
+# Remove non-significant taxa
+sig = res[res$p.adj < 0.05, ]
+
+# And add taxonomy to the table
+sig = cbind(as(tax_table(f_physeqCov_R6_rel)[sig$OTU.id, ], "matrix"), as(sig, "data.frame"))
+
+# And add mean abundance
+sig$MeanAbund = rowMeans(as.matrix(otu_table(f_physeqCov_R6_rel)[sig$OTU.id,]))
+```
+
+Print the results now to avoid the messages from cor.test.
+
+```{r}
+sig
+write.table(sig, "./Spearman-Tables/Genus-vs-MilkIntake.csv", sep = ",",row.names = FALSE)
+```
+
+### Genera vs Other Diet Variables (systematic)
+
+I've created a function (pearsonDiet; can be found at the bottom of this file) for systematically testing all the Diet Variabes (per month)
+
+```{r}
+for (variable in c("Leche.Mes", "Yogur.Mes", "Chocolate.Mes", "Cereales.Inflados.Mes",
+                   "Galletas.Maria.Mes", "Galletas.Chocolate.Mes", "Bolleria.Mes", "Ensalada.Mes",
+                   "Judias.Verdes.Acelgas.Espinacas.Mes", "Verdura.Guarnicion.Mes", "Patatas.Mes",
+                   "Legumbres.Mes", "Arroz.Mes", "Pasta.Mes", "Sopa.Crema.Mes", "Huevos.Mes",
+                   "Pollo.Pavo.Mes", "Carne.Mes", "Carne.Picada.Mes", "Pescado.Blanco.Mes",
+                   "Pescado.Azul.Mes", "Marisco.Mes", "Croquetas.Empanadillas.Pizza.Mes", "Pan.Mes",
+                   "Jamon.Mes", "Queso.Blanco.Mes", "Queso.Mes", "Citricos.Mes", "Otras.Frutas.Mes",
+                   "Zumo.Natural.Mes", "Zumo.Comercial.Mes", "Frutos.Seco.Mes", "Postres.Lacteos.Mes",
+                   "Pasteles.Mes", "Chips.Mes", "Golosinas.Mes", "Helados.Mes",
+                   "Bebidas.Azucaradas.Mes", "Bebidas.Light.Mes", "Vino.Sangra.Mes", "Cerveza.Mes",
+                   "Cerveza.Sin.Alcohol.Mes", "Destilados.Mes")){
+  suppressWarnings(pearsonDiet(f_physeqCov_R6_rel, variable, "Genus"))
+}
+```
+
+### Phylum vs BMI
+
+```{r}
+# For storing each otu tested
+otus = c()
+# For storing each p.value retrieved
+p.values = c()
+# For storing rho values
+rhos = c()
+for (otu in rownames(otu_table(physeqCov_R2_rel)))
+{
+otus = c(otus, otu)
+# Do the calculation
+r = cor.test(as.vector(otu_table(physeqCov_R2_rel)[otu,]),
+         as.vector(as.matrix(sample_data(physeqCov_R2_rel)[, "IMC"])),  method = "spearman")
+# Store the value of this round
+p.values = c(p.values, r$p.value)
+rhos = c(rhos, r$estimate)
+}
+
+# Create a data.frame for summarizing results and add the corrected p.values (Benjamini-Hochberg)
+res = data.frame(otus, p.values, rhos, p.adjust(p.values, method = "BH"))
+colnames(res) = c("OTU.id", "p.value", "rho", "p.adj")
+
+# Remove non-significant taxa
+sig = res[res$p.adj < 0.05, ]
+
+# And add taxonomy to the table
+sig = cbind(as(tax_table(physeqCov_R2_rel)[sig$OTU.id, c(1:2)], "matrix"), as(sig, "data.frame"))
+
+# And add mean abundance
+sig$MeanAbund = rowMeans(as.matrix(otu_table(physeqCov_R2_rel)[sig$OTU.id,]))
+```
+
+Print the results now to avoid the messages from cor.test.
+
+```{r}
+sig
+write.table(sig, "./Spearman-Tables/Phylum-vs-IMC.csv", sep = ",",row.names = FALSE)
+```
+
+### Phylum vs Age
+
+First we need to read those variables as dates.
+
+```{r}
+sample_data(physeqCov_R2_rel)$Fecha.Recepcion = as.Date(sample_data(physeqCov_R2_rel)$Fecha.Recepcion, format = "%d/%m/%Y")
+
+sample_data(physeqCov_R2_rel)$Fecha.Nacimiento = as.Date(sample_data(physeqCov_R2_rel)$Fecha.Nacimiento, format = "%d/%m/%Y")
+```
+
+Now, we can create a new variable that includes the age in float.
+
+```{r}
+sample_data(physeqCov_R2_rel)$Edad = as.double(difftime(sample_data(physeqCov_R2_rel)$Fecha.Recepcion,
+          sample_data(physeqCov_R2_rel)$Fecha.Nacimiento, "days") / 365.6)
+```
+
+And now, we can perform the calculations
+
+```{r}
+# For storing each otu tested
+otus = c()
+# For storing each p.value retrieved
+p.values = c()
+# For storing rho values
+rhos = c()
+for (otu in rownames(otu_table(physeqCov_R2_rel)))
+{
+otus = c(otus, otu)
+# Do the calculation
+r = cor.test(as.vector(otu_table(physeqCov_R2_rel)[otu,]),
+         as.vector(as.matrix(sample_data(physeqCov_R2_rel)[, "Edad"])),  method = "spearman")
+# Store the value of this round
+p.values = c(p.values, r$p.value)
+rhos = c(rhos, r$estimate)
+}
+
+# Create a data.frame for summarizing results and add the corrected p.values (Benjamini-Hochberg)
+res = data.frame(otus, p.values, rhos, p.adjust(p.values, method = "BH"))
+colnames(res) = c("OTU.id", "p.value", "rho", "p.adj")
+
+# Remove non-significant taxa
+sig = res[res$p.adj < 0.05, ]
+
+# And add taxonomy to the table
+sig = cbind(as(tax_table(physeqCov_R2_rel)[sig$OTU.id, c(1:2)], "matrix"), as(sig, "data.frame"))
+
+# And add mean abundance
+sig$MeanAbund = rowMeans(as.matrix(otu_table(physeqCov_R2_rel)[sig$OTU.id,]))
+```
+
+
+```{r}
+sig
+write.table(sig, "./Spearman-Tables/Phylum-vs-Age.csv", sep = ",",row.names = FALSE)
+```
+
+### Phylum vs Milk Intake
+
+
+```{r}
+# For storing each otu tested
+otus = c()
+# For storing each p.value retrieved
+p.values = c()
+# For storing rho values
+rhos = c()
+for (otu in rownames(otu_table(physeqCov_R2_rel)))
+{
+otus = c(otus, otu)
+# Do the calculation
+r = cor.test(as.vector(otu_table(physeqCov_R2_rel)[otu,]),
+         as.vector(as.matrix(sample_data(physeqCov_R2_rel)[, "Leche.Mes"])),  method = "spearman")
+# Store the value of this round
+p.values = c(p.values, r$p.value)
+rhos = c(rhos, r$estimate)
+}
+
+# Create a data.frame for summarizing results and add the corrected p.values (Benjamini-Hochberg)
+res = data.frame(otus, p.values, rhos, p.adjust(p.values, method = "BH"))
+colnames(res) = c("OTU.id", "p.value", "rho", "p.adj")
+
+# Remove non-significant taxa
+sig = res[res$p.adj < 0.05, ]
+
+# And add taxonomy to the table
+sig = cbind(as(tax_table(physeqCov_R2_rel)[sig$OTU.id, c(1:2)], "matrix"), as(sig, "data.frame"))
+
+# And add mean abundance
+sig$MeanAbund = rowMeans(as.matrix(otu_table(physeqCov_R2_rel)[sig$OTU.id,]))
+```
+
+
+Print the results now to avoid the messages from cor.test.
+
+```{r}
+sig
+write.table(sig, "./Spearman-Tables/Phylum-vs-MilkIntake.csv", sep = ",",row.names = FALSE)
+```
+
+Let's see the distribution of Actinobacteria
+
+```{r}
+summary(as.vector(as.matrix(otu_table(physeqCov_R2_rel)["3f3a0eaeea9c0690b6ede1b17b4fd8ce", ])))
+```
+
+### Phylum vs Other Diet Variables (systematic)
+
+I've created a function (pearsonDiet; can be found at the bottom of this file) for systematically testing all the Diet Variabes (per month)
+
+```{r}
+for (variable in c("Leche.Mes", "Yogur.Mes", "Chocolate.Mes", "Cereales.Inflados.Mes",
+                   "Galletas.Maria.Mes", "Galletas.Chocolate.Mes", "Bolleria.Mes", "Ensalada.Mes",
+                   "Judias.Verdes.Acelgas.Espinacas.Mes", "Verdura.Guarnicion.Mes", "Patatas.Mes",
+                   "Legumbres.Mes", "Arroz.Mes", "Pasta.Mes", "Sopa.Crema.Mes", "Huevos.Mes",
+                   "Pollo.Pavo.Mes", "Carne.Mes", "Carne.Picada.Mes", "Pescado.Blanco.Mes",
+                   "Pescado.Azul.Mes", "Marisco.Mes", "Croquetas.Empanadillas.Pizza.Mes", "Pan.Mes",
+                   "Jamon.Mes", "Queso.Blanco.Mes", "Queso.Mes", "Citricos.Mes", "Otras.Frutas.Mes",
+                   "Zumo.Natural.Mes", "Zumo.Comercial.Mes", "Frutos.Seco.Mes", "Postres.Lacteos.Mes",
+                   "Pasteles.Mes", "Chips.Mes", "Golosinas.Mes", "Helados.Mes",
+                   "Bebidas.Azucaradas.Mes", "Bebidas.Light.Mes", "Vino.Sangra.Mes", "Cerveza.Mes",
+                   "Cerveza.Sin.Alcohol.Mes", "Destilados.Mes")){
+  suppressWarnings(pearsonDiet(physeqCov_R2_rel, variable, "Phylum"))
+}
+```
+
+
+### Alfa-diversity vs BMI
+
+Estimate the alfa-diversity (ASV-level. Rarefied to 15K & NOT FILTERED)
+
+```{r}
+alfa = estimate_richness(rarefy_even_depth(physeqCov, sample.size = 15000, rngseed = 711))
+```
+
+Remove the X from the alfa's rownames. This is necessary for matching the rownames of alfa and the rownames of the original phyloseq object created for calculating alfa. The 'X' is added by default by the estimate_richness function.
+
+```{r}
+# Remove the first character
+n = substring(rownames(alfa), 2)
+# Fix the two MEXXXX ids (lasts IDs)
+n[c(length(n) - 1, length(n))] = paste("M", n[c(length(n) - 1, length(n))], sep = "")
+
+rownames(alfa) = n
+```
+
+
+**Richness** 
+
+```{r}
+r = cor.test(alfa$Observed,
+         as.vector(as.matrix(sample_data(physeqCov)[rownames(alfa), "IMC"])),  method = "spearman")
+r
+```
+
+**Shannon**
+
+```{r}
+r = cor.test(alfa$Shannon,
+         as.vector(as.matrix(sample_data(physeqCov)[rownames(alfa), "IMC"])),  method = "spearman")
+r
+```
+
+### Alfa-diversity vs Age
+
+Estimate the alfa-diversity (ASV-level. Rarefied to 15K & NOT FILTERED)
+
+```{r}
+alfa = estimate_richness(rarefy_even_depth(physeqCov, sample.size = 15000, rngseed = 711))
+```
+
+Remove the X from the alfa's rownames. This is necessary for matching the rownames of alfa and the rownames of the original phyloseq object created for calculating alfa. The 'X' is added by default by the estimate_richness function.
+
+```{r}
+# Remove the first character
+n = substring(rownames(alfa), 2)
+# Fix the two MEXXXX ids (lasts IDs)
+n[c(length(n) - 1, length(n))] = paste("M", n[c(length(n) - 1, length(n))], sep = "")
+
+rownames(alfa) = n
+```
+
+Calculate age:
+
+```{r}
+sample_data(physeqCov)$Fecha.Recepcion = as.Date(sample_data(physeqCov)$Fecha.Recepcion, format = "%d/%m/%Y")
+
+sample_data(physeqCov)$Fecha.Nacimiento = as.Date(sample_data(physeqCov)$Fecha.Nacimiento, format = "%d/%m/%Y")
+```
+
+Now, we can create a new variable that includes the age in float.
+
+```{r}
+sample_data(physeqCov)$Edad = as.double(difftime(sample_data(physeqCov)$Fecha.Recepcion,
+          sample_data(physeqCov)$Fecha.Nacimiento, "days") / 365.6)
+```
+
+
+**Richness** 
+
+```{r}
+r = cor.test(alfa$Observed,
+         as.vector(as.matrix(sample_data(physeqCov)[rownames(alfa), "Edad"])),  method = "spearman")
+r
+```
+
+**Shannon**
+
+```{r}
+r = cor.test(alfa$Shannon,
+         as.vector(as.matrix(sample_data(physeqCov)[rownames(alfa), "Edad"])),  method = "spearman")
+r
+```
+
+BOTH RESULTS ARE SIGNIFICATIVE!!
+
+**Richnes separating by Sex**
+
+First, let's create a logical vector with the sex info
+
+```{r}
+sex = as.logical(sample_data(physeqCov)[rownames(alfa), "Gender"] == "Male")
+```
+
+Male
+
+```{r}
+r = cor.test(alfa[sex, "Observed"],
+         as.vector(as.matrix(sample_data(physeqCov)[rownames(alfa), "Edad"]))[sex],
+         method = "spearman")
+r
+```
+
+Female
+
+```{r}
+r = cor.test(alfa[!sex, "Observed"],
+         as.vector(as.matrix(sample_data(physeqCov)[rownames(alfa), "Edad"]))[!sex],
+         method = "spearman")
+r
+```
+
+**Shannon separating by Sex**
+
+Male
+
+```{r}
+r = cor.test(alfa[sex, "Shannon"],
+         as.vector(as.matrix(sample_data(physeqCov)[rownames(alfa), "Edad"]))[sex],
+         method = "spearman")
+r
+```
+
+Female
+
+```{r}
+r = cor.test(alfa[!sex, "Shannon"],
+         as.vector(as.matrix(sample_data(physeqCov)[rownames(alfa), "Edad"]))[!sex],
+         method = "spearman")
+r
+```
+
+
+**Scatter plots**
+
+```{r}
+# Prepare the data
+data = data.frame(alfa$Shannon, 
+                  alfa$Observed, 
+                  as.vector(as.matrix(sample_data(physeqCov)[rownames(alfa), "Edad"])),
+                  as.vector(as.matrix(sample_data(physeqCov)[rownames(alfa), "Gender"])))
+colnames(data) = c("Shannon", "Richness", "Age", "Gender")
+
+# Do the scatterplot for Shannon
+library(ggplot2)
+library(RColorBrewer)
+ggplot(data, aes(x=Age, y=Shannon)) + 
+  geom_point()+
+  geom_smooth(method=lm) + theme_light()
+
+# And for Richness
+ggplot(data, aes(x=Age, y=Richness)) + 
+  geom_point()+
+  geom_smooth(method=lm) + theme_light() + theme (legend.position = "none")
+
+# Now add the sex pattern for Shannon
+ggplot(data, aes(x=Age, y=Shannon, color=Gender)) + 
+  geom_point(alpha = 0.5) +
+  geom_smooth(se = FALSE, alpha = 0.7) +
+  theme_light() + scale_color_brewer(palette = "Set1")
+
+# And for Richness
+ggplot(data, aes(x=Age, y=Richness, color=Gender)) + 
+  geom_point(alpha = 0.5) +
+  geom_smooth(se = FALSE, alpha = 0.7) +
+  theme_light() + scale_color_brewer(palette = "Set1")
+```
+
+## Young adult (<40) males vs females (WILCOXON)
+
+
+```{r}
+sex = as.logical(sample_data(physeqCov)[rownames(alfa), "Gender"] == "Male")
+young = as.logical(sample_data(physeqCov)[rownames(alfa), "Edad"] <= 60)
+```
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+wilcox.test(alfa$Observed[sex & young],
+            alfa$Observed[!sex & young])
+```
+
+**NO!**
+
+**Shannon**
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+wilcox.test(alfa$Shannon[sex & young],
+            alfa$Shannon[!sex & young])
+```
+
+### Alfa-diversity vs Milk intake
+
+**Richness** 
+
+```{r}
+r = cor.test(alfa$Observed,
+         as.vector(as.matrix(sample_data(physeqCov)[rownames(alfa), "Leche.Mes"])), 
+         method = "spearman")
+r
+```
+
+**Shannon**
+
+```{r}
+r = cor.test(alfa$Shannon,
+         as.vector(as.matrix(sample_data(physeqCov)[rownames(alfa), "Leche.Mes"])), 
+         method = "spearman")
+r
+```
+
+### Alfa-diversity vs Diet Variables
+
+**Richness**
+
+```{r}
+# For storing each p.value retrieved
+p.values = c()
+# For storing rho values
+rhos = c()
+# For storing variables
+variables = c()
+for (variable in c("Leche.Mes", "Yogur.Mes", "Chocolate.Mes", "Cereales.Inflados.Mes",
+                   "Galletas.Maria.Mes", "Galletas.Chocolate.Mes", "Bolleria.Mes", "Ensalada.Mes",
+                   "Judias.Verdes.Acelgas.Espinacas.Mes", "Verdura.Guarnicion.Mes", "Patatas.Mes",
+                   "Legumbres.Mes", "Arroz.Mes", "Pasta.Mes", "Sopa.Crema.Mes", "Huevos.Mes",
+                   "Pollo.Pavo.Mes", "Carne.Mes", "Carne.Picada.Mes", "Pescado.Blanco.Mes",
+                   "Pescado.Azul.Mes", "Marisco.Mes", "Croquetas.Empanadillas.Pizza.Mes", "Pan.Mes",
+                   "Jamon.Mes", "Queso.Blanco.Mes", "Queso.Mes", "Citricos.Mes", "Otras.Frutas.Mes",
+                   "Zumo.Natural.Mes", "Zumo.Comercial.Mes", "Frutos.Seco.Mes", "Postres.Lacteos.Mes",
+                   "Pasteles.Mes", "Chips.Mes", "Golosinas.Mes", "Helados.Mes",
+                   "Bebidas.Azucaradas.Mes", "Bebidas.Light.Mes", "Vino.Sangra.Mes", "Cerveza.Mes",
+                   "Cerveza.Sin.Alcohol.Mes", "Destilados.Mes")){
+  message(paste("Computing Richness for", variable))
+  r = cor.test(alfa$Observed,
+           as.vector(as.matrix(sample_data(physeqCov)[rownames(alfa), variable])),
+           method = "spearman")
+  # Store the value of this round
+  p.values = c(p.values, r$p.value)
+  rhos = c(rhos, r$estimate)
+  variables = c(variables, variable)
+}
+
+res = data.frame(variables, p.values, rhos, p.adjust(p.values, method = "BH"))
+colnames(res) = c("Variable", "p.value", "rho", "p.adj")
+# Remove non-significant taxa
+sig = res[res$p.adj < 0.05, ]
+sig
+```
+
+
+**Shannon**
+
+```{r}
+# For storing each p.value retrieved
+p.values = c()
+# For storing rho values
+rhos = c()
+# For storing variables
+variables = c()
+for (variable in c("Leche.Mes", "Yogur.Mes", "Chocolate.Mes", "Cereales.Inflados.Mes",
+                   "Galletas.Maria.Mes", "Galletas.Chocolate.Mes", "Bolleria.Mes", "Ensalada.Mes",
+                   "Judias.Verdes.Acelgas.Espinacas.Mes", "Verdura.Guarnicion.Mes", "Patatas.Mes",
+                   "Legumbres.Mes", "Arroz.Mes", "Pasta.Mes", "Sopa.Crema.Mes", "Huevos.Mes",
+                   "Pollo.Pavo.Mes", "Carne.Mes", "Carne.Picada.Mes", "Pescado.Blanco.Mes",
+                   "Pescado.Azul.Mes", "Marisco.Mes", "Croquetas.Empanadillas.Pizza.Mes", "Pan.Mes",
+                   "Jamon.Mes", "Queso.Blanco.Mes", "Queso.Mes", "Citricos.Mes", "Otras.Frutas.Mes",
+                   "Zumo.Natural.Mes", "Zumo.Comercial.Mes", "Frutos.Seco.Mes", "Postres.Lacteos.Mes",
+                   "Pasteles.Mes", "Chips.Mes", "Golosinas.Mes", "Helados.Mes",
+                   "Bebidas.Azucaradas.Mes", "Bebidas.Light.Mes", "Vino.Sangra.Mes", "Cerveza.Mes",
+                   "Cerveza.Sin.Alcohol.Mes", "Destilados.Mes")){
+  message(paste("Computing Richness for", variable))
+  r = cor.test(alfa$Shannon,
+           as.vector(as.matrix(sample_data(physeqCov)[rownames(alfa), variable])),
+           method = "spearman")
+  # Store the value of this round
+  p.values = c(p.values, r$p.value)
+  rhos = c(rhos, r$estimate)
+  variables = c(variables, variable)
+}
+
+res = data.frame(variables, p.values, rhos, p.adjust(p.values, method = "BH"))
+colnames(res) = c("Variable", "p.value", "rho", "p.adj")
+# Remove non-significant taxa
+sig = res[res$p.adj < 0.05, ]
+sig
+```
+
+
+### Milk intake vs presence/absence
+
+Well, we have established a positive correlation between dairy intake and Bifidobacterium abundance. However, as Bifidobacterium, Lactobacillus and Akkermansia are not present in all the samples (especially in the case of Lactobacillus), it's interesting to look if the people who have these taxa in their guts take more dairy.
+
+**Lactobacillus**
+
+```{r}
+# Select the taxon of interest
+tax = subset_taxa(f_physeqCov_R6_rel, Rank6 == "g__Lactobacillus")
+
+# Store the ids that contain > 0% of the this taxon
+log = as.logical(otu_table(tax) > 0)
+
+# We can now separate the dairy intake into 2 groups and perform the test
+# As always as.vector/as.matrix is just to convert the phyloseq objecto into R-base objects
+wilcox.test(as.vector(as.matrix(sample_data(tax)[log,"Leche.Mes"])),
+            as.vector(as.matrix(sample_data(tax)[!log,"Leche.Mes"])))
+```
+
+Box-plot
+
+```{r}
+dairy = c(as.vector(as.matrix(sample_data(tax)[log,"Leche.Mes"])),
+            as.vector(as.matrix(sample_data(tax)[!log,"Leche.Mes"])))
+lacto = c(rep("yes", length(as.vector(as.matrix(sample_data(tax)[log,"Leche.Mes"])))),
+          rep("no", length(as.vector(as.matrix(sample_data(tax)[!log,"Leche.Mes"])))))
+data = data.frame(dairy,lacto)
+
+library(ggplot2)
+ggplot(data, aes(x=lacto, y=dairy, fill=lacto)) + 
+  geom_boxplot(notch = TRUE) + theme_light()
+```
+
+**Bifidobacterium**
+
+```{r}
+# Select the taxon of interest
+tax = subset_taxa(f_physeqCov_R6_rel, Rank6 == "g__Bifidobacterium")
+
+# Store the ids that contain > 0% of the this taxon
+log = as.logical(otu_table(tax) > 0)
+
+# We can now separate the dairy intake into 2 groups and perform the test
+# As always as.vector/as.matrix is just to convert the phyloseq objecto into R-base objects
+wilcox.test(as.vector(as.matrix(sample_data(tax)[log,"Leche.Mes"])),
+            as.vector(as.matrix(sample_data(tax)[!log,"Leche.Mes"])))
+```
+
+Box-plot
+
+```{r}
+dairy = c(as.vector(as.matrix(sample_data(tax)[log,"Leche.Mes"])),
+            as.vector(as.matrix(sample_data(tax)[!log,"Leche.Mes"])))
+bifido = c(rep("yes", length(as.vector(as.matrix(sample_data(tax)[log,"Leche.Mes"])))),
+          rep("no", length(as.vector(as.matrix(sample_data(tax)[!log,"Leche.Mes"])))))
+data = data.frame(dairy,bifido)
+
+library(ggplot2)
+ggplot(data, aes(x=bifido, y=dairy, fill=bifido)) + 
+  geom_boxplot(notch = TRUE) + theme_light() + xlab("Presence of Bifidobacterium")
+```
+
+**Akkermansia**
+
+```{r}
+# Select the taxon of interest
+tax = subset_taxa(f_physeqCov_R6_rel, Rank6 == "g__Akkermansia")
+
+# Store the ids that contain > 0% of the this taxon
+log = as.logical(otu_table(tax) > 0)
+
+# We can now separate the dairy intake into 2 groups and perform the test
+# As always as.vector/as.matrix is just to convert the phyloseq objecto into R-base objects
+wilcox.test(as.vector(as.matrix(sample_data(tax)[log,"Leche.Mes"])),
+            as.vector(as.matrix(sample_data(tax)[!log,"Leche.Mes"])))
+```
+
+Box-plot
+
+```{r}
+dairy = c(as.vector(as.matrix(sample_data(tax)[log,"Leche.Mes"])),
+            as.vector(as.matrix(sample_data(tax)[!log,"Leche.Mes"])))
+bifido = c(rep("yes", length(as.vector(as.matrix(sample_data(tax)[log,"Leche.Mes"])))),
+          rep("no", length(as.vector(as.matrix(sample_data(tax)[!log,"Leche.Mes"])))))
+data = data.frame(dairy,lacto)
+
+library(ggplot2)
+ggplot(data, aes(x=bifido, y=dairy, fill=bifido)) + 
+  geom_boxplot(notch = TRUE) + theme_light() + xlab("Presence of Akkermansia")
+```
+
+
+# Accessory Functions
+
+## Phyloseq to df
+
+```{r}
+phyloseq_to_df <- function(physeq, addtax = T, addtot = F, addmaxrank = F, sorting = "abundance"){
+
+  # require(phyloseq)
+
+  ## Data validation
+  if(any(addtax == TRUE || sorting == "taxonomy")){
+    if(is.null(phyloseq::tax_table(physeq, errorIfNULL = F))){
+      stop("Error: taxonomy table slot is empty in the input data.\n")
+    }
+  }
+
+  ## Prepare data frame
+  if(taxa_are_rows(physeq) == TRUE){
+    res <- data.frame(OTU = phyloseq::taxa_names(physeq), phyloseq::otu_table(physeq), stringsAsFactors = F)
+  } else {
+    res <- data.frame(OTU = phyloseq::taxa_names(physeq), t(phyloseq::otu_table(physeq)), stringsAsFactors = F)
+  }
+
+  ## Check if the sample names were silently corrected in the data.frame
+  if(any(!phyloseq::sample_names(physeq) %in% colnames(res)[-1])){
+    if(addtax == FALSE){
+      warning("Warning: Sample names were converted to the syntactically valid column names in data.frame. See 'make.names'.\n")
+    }
+
+    if(addtax == TRUE){
+      stop("Error: Sample names in 'physeq' could not be automatically converted to the syntactically valid column names in data.frame (see 'make.names'). Consider renaming with 'sample_names'.\n")
+    }
+  }
+
+  ## Add taxonomy
+  if(addtax == TRUE){
+
+    ## Extract taxonomy table
+    taxx <- as.data.frame(phyloseq::tax_table(physeq), stringsAsFactors = F)
+
+    ## Reorder taxonomy table
+    taxx <- taxx[match(x = res$OTU, table = rownames(taxx)), ]
+
+    ## Add taxonomy table to the data
+    res <- cbind(res, taxx)
+
+    ## Add max tax rank column
+    if(addmaxrank == TRUE){
+
+      ## Determine the lowest level of taxonomic classification
+      res$LowestTaxRank <- get_max_taxonomic_rank(taxx, return_rank_only = TRUE)
+
+      ## Reorder columns (OTU name - Taxonomy - Max Rank - Sample Abundance)
+      res <- res[, c("OTU", phyloseq::rank_names(physeq), "LowestTaxRank", phyloseq::sample_names(physeq))]
+
+    } else {
+      ## Reorder columns (OTU name - Taxonomy - Sample Abundance)
+      res <- res[, c("OTU", phyloseq::rank_names(physeq), phyloseq::sample_names(physeq))]
+
+    } # end of addmaxrank
+  }   # end of addtax
+
+  ## Reorder OTUs
+  if(!is.null(sorting)){
+
+    ## Sort by OTU abundance
+    if(sorting == "abundance"){
+      otus <- res[, which(colnames(res) %in% phyloseq::sample_names(physeq))]
+      res <- res[order(rowSums(otus, na.rm = T), decreasing = T), ]
+    }
+
+    ## Sort by OTU taxonomy
+    if(sorting == "taxonomy"){
+      taxtbl <- as.data.frame( phyloseq::tax_table(physeq), stringsAsFactors = F )
+
+      ## Reorder by all columns
+      taxtbl <- taxtbl[do.call(order, taxtbl), ]
+      # taxtbl <- data.table::setorderv(taxtbl, cols = colnames(taxtbl), na.last = T)
+      res <- res[match(x = rownames(taxtbl), table = res$OTU), ]
+    }
+  }
+
+  ## Add OTU total abundance
+  if(addtot == TRUE){
+    res$Total <- rowSums(res[, which(colnames(res) %in% phyloseq::sample_names(physeq))])
+  }
+
+  rownames(res) <- NULL
+  return(res)
+}
+```
+
+## pearsonDiet
+
+```{r}
+pearsonDiet = function(physeq, variableName, level="Genus"){
+  # For storing each otu tested
+  otus = c()
+  # For storing each p.value retrieved
+  p.values = c()
+  # For storing rho values
+  rhos = c()
+  for (otu in rownames(otu_table(physeq)))
+  {
+  otus = c(otus, otu)
+  # Do the calculation
+  r = cor.test(as.vector(otu_table(physeq)[otu,]),
+           as.vector(as.matrix(sample_data(physeq)[, variableName])),  method = "spearman")
+  # Store the value of this round
+  p.values = c(p.values, r$p.value)
+  rhos = c(rhos, r$estimate)
+  }
+  
+  # Let's do some try / except for multiple testing
+  sig = tryCatch(
+    { # Try to
+      # Create a data.frame for summarizing results and add the corrected p.values (Benjamini-Hochberg)
+      res = data.frame(otus, p.values, rhos, p.adjust(p.values, method = "BH"))
+      colnames(res) = c("OTU.id", "p.value", "rho", "p.adj")
+      # Remove non-significant taxa
+      sig = res[res$p.adj < 0.05, ]
+      
+      # And add taxonomy to the table
+      sig = cbind(as(tax_table(physeq)[sig$OTU.id, ], "matrix"), as(sig, "data.frame"))
+      
+      # And add mean abundance
+      sig$MeanAbund = rowMeans(as.matrix(otu_table(physeq)[sig$OTU.id,]))
+      
+      write.table(sig, paste("./Spearman-Tables/Systematic/", level, "-vs-", 
+                             variableName, ".csv", sep = ""),
+                  sep = ",",row.names = FALSE)
+      
+      message(paste (length(rownames(sig)), level, "significant for", variableName))
+    },
+    error=function(cond) {
+        message(paste("No significant OTUs for", variableName))
+        message("Here's the original error message:")
+        message(cond)
+        # Choose a return value in case of error
+        return(NA)
+    },
+    warning=function(cond) {
+        message(paste("No significant OTUs for", variableName))
+        message("Here's the original warning message:")
+        message(cond)
+        # Choose a return value in case of warning
+        return(NULL)
+    },
+    finally={
+        message(paste("Processed variable:", variableName, "\n"))
+    }
+  )
+  return(sig)
+}
+```
+
+
+
+---------------------------------------------
+
+# Article Text Calculations & FIGURES
+
+### Firmicutes:Bacteroidetes
+
+```{r}
+firm = subset_taxa(physeq_R2_rel, Rank2 == "p__Firmicutes")
+bact = subset_taxa(physeq_R2_rel, Rank2 == "p__Bacteroidota")
+```
+
+Average
+
+```{r}
+print("Average:")
+mean(otu_table(firm)/otu_table(bact))
+```
+
+Condience interval
+
+```{r}
+library(Rmisc)
+CI(otu_table(firm)/otu_table(bact), ci = 0.95)
+```
+
+
+
+Overall alfa-diversity
+
+```{r}
+r = estimate_richness(rarefy_even_depth(physeq1, sample.size = 15000, rngseed = 711))
+mean(r$Observed)
+mean(r$Shannon)
+sd(r$Observed)
+sd(r$Shannon)
+```
+
+```{r}
+r = estimate_richness(rarefy_even_depth(physeq_R6, sample.size = 15000, rngseed = 711))
+mean(r$Observed)
+mean(r$Shannon)
+sd(r$Observed)
+sd(r$Shannon)
+```
+
+```{r}
+r = estimate_richness(rarefy_even_depth(physeq_R2, sample.size = 15000, rngseed = 711))
+mean(r$Observed)
+mean(r$Shannon)
+sd(r$Observed)
+sd(r$Shannon)
+```
+
+Globally detected genus:
+
+```{r}
+table(taxa_sums(otu_table(physeq_R6)) > 0)
+```
+
+Some of the genus sumed 0 since 4 samples were removed.
+
+Globally detected phylum:
+
+```{r}
+table(taxa_sums(otu_table(physeq_R2)) > 0)
+```
+
+
+## Figure 1a. Radar charts. Sex.
+
+[Tutorial here](https://www.r-graph-gallery.com/143-spider-chart-with-saveral-individuals.html)
+
+### Phylum level
+
+First we have to obtain top 10 genera and create a data.frame
+
+```{r}
+library(data.table)
+n = names(head(sort(rowMeans(otu_table(physeq_R2_rel)), decreasing = TRUE), 10))
+p = subset_taxa(physeq_R2_rel, rownames(tax_table(physeq_R2_rel)) %in% n)
+p.df = as(otu_table(p), "matrix")
+p.df = data.frame(p.df)
+p.df = transpose(p.df)
+colnames(p.df) = tax_table(p)[, "Rank2"]
+p.df$SampleID = rownames(sample_data(p))
+p.df$Sex = sample_data(p)$Gender
+```
+
+Aggregate results by sex:
+
+```{r}
+p.df.agg = aggregate(p.df[, 1:10], list(p.df$Sex), mean)
+rownames(p.df.agg) = p.df.agg$Group.1
+p.df.agg = p.df.agg[, c(2:length(colnames(p.df.agg)))]
+p.df.agg
+```
+
+Add a row of maximum and mininum values. This is mandatory for using radarchart().
+
+We transform to log10 values in order to improve visualization
+
+```{r}
+p.df.agg = rbind(rep(2, 10), rep(-2, 10), p.df.agg)
+p.df.agg[3:4,] = log10(p.df.agg[3:4,])
+p.df.agg
+```
+
+
+Change phylum names and sort by abundance
+
+```{r}
+colnames(p.df.agg) = c("Desulfobacterota", "Actinobacteriota", "Firmicutes", "Bacteroidota", "Elusimicrobiota", "Cyanobacteria", "Euryarchaeota" , "Proteobacteria", "Verrucomicrobiota", "Synergistota")
+
+p.df.agg = data.frame(p.df.agg$Firmicutes, p.df.agg$Bacteroidota, p.df.agg$Proteobacteria, p.df.agg$Verrucomicrobiota, p.df.agg$Actinobacteriota, p.df.agg$Desulfobacterota, p.df.agg$Cyanobacteria, p.df.agg$Elusimicrobiota, p.df.agg$Euryarchaeota, p.df.agg$Synergistota)
+
+colnames(p.df.agg) = c("Firmicutes", "Bacteroidota", "Proteobacteria", "Verrucomicrobiota", "Actinobacteriota", "Desulfobacterota", "Cyanobacteria", "Elusimicrobiota", "Euryarchaeota", "Synergistota")
+
+rownames(p.df.agg) = c("max", "min", "female", "male")
+p.df.agg
+```
+
+
+And create the chart
+
+```{r}
+# Color vector
+colors_border=c( rgb(0.2,0.5,0.5,0.9), rgb(0.8,0.2,0.5,0.9))
+colors_in=c( rgb(0.2,0.5,0.5,0.4), rgb(0.8,0.2,0.5,0.4))
+
+library(fmsb)
+radarchart(p.df.agg, axistype=1, 
+    #custom polygon
+    pcol=colors_border , pfcol=colors_in , plwd=4 , plty=1,
+    #custom the grid
+    cglcol="grey", cglty=1, axislabcol="grey", caxislabels=seq(-2,2,1), cglwd=0.8,
+    #custom labels
+    vlcex=0.8 
+    )
+
+# Add a legend
+legend(x=0.7, y=1, legend = rownames(p.df.agg[-c(1,2),]), bty = "n", pch=20 , col=colors_in , text.col = "grey", cex=1.2, pt.cex=3)
+```
+
+## Fig 1a. ALTERNATIVE: barplot
+
+### Phylum level
+
+```{r}
+library(data.table)
+n = names(head(sort(rowMeans(otu_table(physeq_R2_rel)), decreasing = TRUE), 10))
+p = subset_taxa(physeq_R2_rel, rownames(tax_table(physeq_R2_rel)) %in% n)
+p.df = as(otu_table(p), "matrix")
+p.df = data.frame(p.df)
+p.df = transpose(p.df)
+colnames(p.df) = tax_table(p)[, "Rank2"]
+p.df$SampleID = rownames(sample_data(p))
+p.df$Sex = sample_data(p)$Gender
+```
+
+Aggregate results by sex:
+
+```{r}
+p.df.agg = aggregate(p.df[, 1:10], list(p.df$Sex), mean)
+rownames(p.df.agg) = p.df.agg$Group.1
+p.df.agg = p.df.agg[, c(2:length(colnames(p.df.agg)))]
+colnames(p.df.agg) = c("Desulfobacterota", "Actinobacteriota", "Firmicutes", "Bacteroidota", "Elusimicrobiota", "Cyanobacteria", "Euryarchaeota", "Proteobacteria", "Verrucomicrobiota", "Synergistota")
+p.df.agg
+```
+
+Transpose the results and create a long df
+
+```{r}
+# Transpose
+t.p.df.agg = transpose(p.df.agg)
+colnames(t.p.df.agg) = rownames(p.df.agg)
+rownames(t.p.df.agg) = colnames(p.df.agg)
+t.p.df.agg$taxon = rownames(t.p.df.agg)
+
+# Reshape
+library(reshape2)
+long <- melt(t.p.df.agg, id.vars = c("taxon"))
+colnames(long)[2:3] = c("Sex", "Abundance")
+long
+```
+
+And create the barplot:
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p <- ggplot(data=long, aes(x=taxon, y=Abundance, fill=Sex)) +
+  geom_bar(stat="identity", color="gray100", position=position_dodge(width=0.95),
+           width=0.75) +
+  theme_minimal() +
+  scale_fill_brewer(palette="Blues") +
+  xlab("") + ylab("Relative Abundance (%)") +
+  theme(axis.text.x = element_text(colour = "black"),
+        axis.text.y = element_text(colour = "black"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.y = element_blank()) +
+  coord_flip()
+```
+
+Well, I'm happy with the aesthethic, but the visualization is difficult due to Firmicutes and Bacteroidota. Let's split the graph in two.
+
+**Firmicutes and Bacteroidota**
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p <- ggplot(data=long[long$taxon == "Firmicutes" | long$taxon == "Bacteroidota", ],
+            aes(x=taxon, y=Abundance, fill=Sex)) +
+  geom_bar(stat="identity", color="gray25", position=position_dodge(width=0.95),
+           width=0.75) +
+  geom_text(aes(label=round(Abundance, 2)), position=position_dodge(width=0.9)) + 
+  theme_minimal() +
+  scale_fill_brewer(palette="Blues") +
+  xlab("") + ylab("Relative Abundance (%)") +
+  theme(axis.text.x = element_text(colour = "black"),
+        axis.text.y = element_text(colour = "black"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text = element_text(size = 14)) +
+  coord_flip()
+```
+
+**Rest**
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p <- ggplot(data=long[long$taxon != "Firmicutes" & long$taxon != "Bacteroidota", ],
+            aes(x=factor(taxon, levels = rev(c("Proteobacteria", "Verrucomicrobiota",
+                                           "Actinobacteriota", "Desulfobacterota",
+                                           "Cyanobacteria", "Elusimicrobiota", "Euryarchaeota",
+                                           "Synergistota"))),
+                y=Abundance, fill=Sex)) +
+  geom_bar(stat="identity", color="gray25", position=position_dodge(width=0.95),
+           width=0.75) +
+  geom_text(aes(label=round(Abundance, 2)), position=position_dodge(width=0.9)) + 
+  theme_minimal() +
+  scale_fill_brewer(palette="Blues") +
+  xlab("") + ylab("Relative Abundance (%)") +
+  theme(axis.text.x = element_text(colour = "black"),
+        axis.text.y = element_text(colour = "black"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text = element_text(size = 14)) +
+  coord_flip()
+```
+
+Save the image in 600x700. I will manually adjust the labels in inkscape.
+
+### Genus level
+
+```{r}
+library(data.table)
+n = names(head(sort(rowMeans(otu_table(physeq_R6_rel)), decreasing = TRUE), 10))
+p = subset_taxa(physeq_R6_rel, rownames(tax_table(physeq_R6_rel)) %in% n)
+p.df = as(otu_table(p), "matrix")
+p.df = data.frame(p.df)
+p.df = transpose(p.df)
+colnames(p.df) = tax_table(p)[, "Rank6"]
+p.df$SampleID = rownames(sample_data(p))
+p.df$Sex = sample_data(p)$Gender
+```
+
+Aggregate results by sex:
+
+```{r}
+p.df.agg = aggregate(p.df[, 1:10], list(p.df$Sex), mean)
+rownames(p.df.agg) = p.df.agg$Group.1
+p.df.agg = p.df.agg[, c(2:length(colnames(p.df.agg)))]
+colnames(p.df.agg) = c("Unass. Lachnospiraceae","Faecalibacterium", "Bacteroides", "Parabacteroides", "Prevotella", "Roseburia", "Oscillospiraceae UCG-002", "Subdoligranulum", "Alistipes", "Clostridia UCG-014")
+p.df.agg
+```
+
+Transpose the results and create a long df
+
+```{r}
+# Transpose
+t.p.df.agg = transpose(p.df.agg)
+colnames(t.p.df.agg) = rownames(p.df.agg)
+rownames(t.p.df.agg) = colnames(p.df.agg)
+t.p.df.agg$taxon = rownames(t.p.df.agg)
+
+# Reshape
+library(reshape2)
+long <- melt(t.p.df.agg, id.vars = c("taxon"))
+colnames(long)[2:3] = c("Sex", "Abundance")
+long
+```
+
+And create the barplot:
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p <- ggplot(data=long, aes(x=factor(taxon, levels = rev(names(sort(colMeans(p.df.agg),
+                                                                   decreasing = TRUE)))),
+                           y=Abundance, fill=Sex)) +
+  geom_bar(stat="identity", color="gray25", position=position_dodge(width=0.95),
+           width=0.75) +
+  geom_text(aes(label=round(Abundance, 2)), position=position_dodge(width=0.9)) + 
+  theme_minimal() +
+  scale_fill_brewer(palette="Blues") +
+  xlab("") + ylab("Relative Abundance (%)") +
+  theme(axis.text.x = element_text(colour = "black"),
+        axis.text.y = element_text(colour = "black"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text = element_text(size = 14)) +
+  coord_flip() + scale_y_reverse()
+```
+
+Save the image in 600x700. I will manually adjust the labels in inkscape.
+
+## Richness vs. Number of samples
+
+There are different number of participants in each region, according to the real distribution of the population in Spain. So, it's importat to check if there's any kind of bias in the diversity measures of each region.
+
+The following code has been copied and adapted from #Graphs on Maps section (diversity subsection):
+
+First, let's calculate de diversity metrics with the phyloseq::estimate_richness function.
+
+```{r}
+rich = estimate_richness(rarefy_even_depth(physeq1, sample.size = 15000, rngseed = 711))
+# Add a column with the sampleID but with no "X" (R puts this "X" automatically)
+rich$SampleID = substr(rownames(rich), 2, 20)
+# But this is not applicable to the 2 samples which ID starts with ME
+# Let's change these SampleIDs
+rich$SampleID[rich$SampleID == "E10670001415"] = "ME10670001415"
+rich$SampleID[rich$SampleID == "E10678455290"] = "ME10678455290"
+head(rich)
+```
+
+Now, let's add the metadata to the rich data.frame. We will merge the two objects
+
+```{r}
+rich_merged = merge(rich, data.frame(sample_data(physeq1)), by.x = "SampleID", by.y = "SampleName")
+head(rich_merged)
+```
+
+We're not interested in all the variables, but some. Let's select them.
+
+```{r}
+rich_merged = rich_merged[, c("Observed", "Shannon", "Region", "SampleID")]
+head(rich_merged)
+```
+
+Now, aggregate to calculate mean values:
+
+```{r}
+x = aggregate(rich_merged[, "Observed"], list(rich_merged$Region), mean)
+```
+
+Let's add the number of samples by each sample:
+
+```{r}
+x$Samples = summary(rich_merged$Region)[summary(rich_merged$Region) != 0]
+colnames(x)[c(1:2)] = c("Region", "DiversityMeasure")
+```
+
+And now plot it and apply spearman's test:
+
+```{r}
+# Graph
+library(ggplot2)
+library(RColorBrewer)
+ggplot(x, aes(x=DiversityMeasure, y=Samples)) + 
+  geom_point(color="royalblue", size = 3)+
+  geom_smooth(method=lm, color = "gold", alpha=0.2) + theme_minimal()
+
+# Test
+cor.test(x$DiversityMeasure, x$Samples, method = "spearman")
+```
+
+!!!! It's not significant !!!!
+
+Now we'll do the same for Shannon
+
+```{r}
+x = aggregate(rich_merged[, "Shannon"], list(rich_merged$Region), mean)
+```
+
+Let's add the number of samples by each sample:
+
+```{r}
+x$Samples = summary(rich_merged$Region)[summary(rich_merged$Region) != 0]
+colnames(x)[c(1:2)] = c("Region", "DiversityMeasure")
+```
+
+And now plot it and apply spearman's test:
+
+```{r}
+# Graph
+library(ggplot2)
+library(RColorBrewer)
+ggplot(x, aes(x=DiversityMeasure, y=Samples)) + 
+  geom_point(color="darkred", size = 3)+
+  geom_smooth(method=lm, color = "gold", alpha=0.2) + theme_minimal()
+
+# Test
+cor.test(x$DiversityMeasure, x$Samples, method = "spearman")
+```
+
+!!!! It's not significant !!!!
+
+## Fig. 2A: Boxplot Significative Text
+
+----------------------------------------------------------
+Discarded:
+
+Select the significative genus (see R_analysis/DESeq2-Tables/MaleVsFemale) or chunk 142.
+
+Los otu names son los siguientes: 09ad3f07c79e7bbc78206689dc55492d, 24d821dddfbe031b81a44817e6d6a4c1, 31c7bc067538dcf7916e8b7cbefa44e5, 4516aa60a483dd8c7bbc57098c45f1a5, 4df8473b0be4ef1e59f0b0709c586919, 9591a959c4c592a119485d2f38ae27eb, 9be8e4d4919ec569eb355cb676c02eef, b978450e75ae38f47e8e4fadc48bbd0b, e387d8b5cf3d6c61e65019accb884109
+
+```{r}
+library(data.table)
+n = c("09ad3f07c79e7bbc78206689dc55492d", "24d821dddfbe031b81a44817e6d6a4c1", "31c7bc067538dcf7916e8b7cbefa44e5", "4516aa60a483dd8c7bbc57098c45f1a5", "4df8473b0be4ef1e59f0b0709c586919", "9591a959c4c592a119485d2f38ae27eb", "9be8e4d4919ec569eb355cb676c02eef", "b978450e75ae38f47e8e4fadc48bbd0b", "e387d8b5cf3d6c61e65019accb884109")
+p = subset_taxa(physeq_R6_rel, rownames(tax_table(physeq_R6_rel)) %in% n)
+p.df = as(otu_table(p), "matrix")
+p.df = data.frame(p.df)
+p.df = transpose(p.df)
+colnames(p.df) = tax_table(p)[, "Rank6"]
+p.df$SampleID = rownames(sample_data(p))
+p.df$Sex = sample_data(p)$Gender
+
+# Change names
+colnames(p.df) = c("Oscillibacter", "Unass. Enterobacteriaceae", "Anaerostipes", "Faecalibacterium", "Ruminococcaceae UBA1819", "Uncult. Coriobacteriales", "Flavonifractor", "Ruminococcus gauvreauii group", "Mitsuokella")
+```
+
+Convert to long format:
+
+```{r}
+library(tidyr)
+# The arguments to gather():
+# - data: Data object
+# - key: Name of new key column (made from names of data columns)
+# - value: Name of new value column
+# - ...: Names of source columns that contain values
+# - factor_key: Treat the new key column as a factor (instead of character vector)
+long <- gather(p.df, Taxon, Relative_abundance, Oscillibacter:Mitsuokella, factor_key=TRUE)
+colnames(long)[c(1:2)] = c("SampleID", "Sex")
+long
+```
+
+And create the plot:
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p <- ggplot(long, aes(x=Sex, y=Relative_abundance, fill=Sex)) + 
+  geom_violin() +
+  facet_wrap(~Taxon, ncol = 3, scales = "free") +
+  theme_classic() +
+  xlab("") + ylab("Relative Abundance (%)") +
+  scale_fill_brewer(palette = "Blues")
+```
+
+I don't see it.
+
+----------------------------------------------------------
+
+Let's select only few taxa:
+
+**Faecalibacterium**
+
+Select the taxon:
+
+```{r}
+lacto.df = long[long$Taxon == "Faecalibacterium",]
+```
+
+And do the plot
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p = ggplot(data = lacto.df, aes(x = Sex, y = Relative_abundance, fill = Sex)) +
+  geom_violin(alpha = 0.7, color = "gray35") +
+  geom_boxplot(alpha = 0.7, color = "gray55", fill = NA, notch = TRUE) + 
+  stat_summary(fun=mean, geom="point", shape=18, size=3, color="gray35", fill="gray35", alpha = 0.7) + 
+  xlab("") + ylab ("Relative Abundance (%)") +
+  scale_fill_brewer(palette = "Blues") +
+  theme_classic() +
+  
+  theme (
+    legend.position = "top",
+    axis.text = element_text(size = 14),
+    axis.title.y = element_text(size = 14)
+  )
+```
+
+Save in 450x450.
+
+**Proteobacteria**
+
+Select Proteobacteria
+
+```{r}
+library(data.table)
+n = "a0d65b09727273e1349cbd2566ce2f63"
+p = subset_taxa(physeq_R2_rel, rownames(tax_table(physeq_R2_rel)) %in% n)
+p.df = as(otu_table(p), "matrix")
+p.df = data.frame(p.df)
+p.df = transpose(p.df)
+colnames(p.df) = tax_table(p)[, "Rank2"]
+p.df$SampleID = rownames(sample_data(p))
+p.df$Sex = sample_data(p)$Gender
+
+# Change names
+colnames(p.df)[1] = c("Proteobacteria")
+```
+
+Convert to long:
+
+```{r}
+library(tidyr)
+# The arguments to gather():
+# - data: Data object
+# - key: Name of new key column (made from names of data columns)
+# - value: Name of new value column
+# - ...: Names of source columns that contain values
+# - factor_key: Treat the new key column as a factor (instead of character vector)
+long <- gather(p.df, Taxon, Relative_abundance, Proteobacteria:Proteobacteria, factor_key=TRUE)
+long
+```
+
+Just to follow the same code logic (I know is weird):
+
+```{r}
+lacto.df = long
+```
+
+Do the plot
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p = ggplot(data = lacto.df, aes(x = Sex, y = Relative_abundance, fill = Sex)) +
+  geom_violin(alpha = 0.7, color = "gray35") +
+  geom_boxplot(alpha = 0.7, color = "gray55", fill = NA, notch = TRUE) + 
+  stat_summary(fun=mean, geom="point", shape=18, size=3, color="gray35", fill="gray35", alpha = 0.7) + 
+  xlab("") + ylab ("Relative Abundance (%)") +
+  scale_fill_brewer(palette = "Blues") +
+  theme_classic() +
+  
+  theme (
+    legend.position = "top",
+    axis.text = element_text(size = 14),
+    axis.title.y = element_text(size = 14)
+  )
+```
+
+Save it in 450X450
+
+
+# Fig. 2B. Age.
+
+Calculate chunks 171 - 174 (previously, create the object).
+
+```{r}
+sig
+```
+
+Prepare the object:
+
+```{r}
+heat.df = data.frame(sig$Rank6, sig$rho)
+colnames(heat.df) = c("Genus", "Rho")
+# Change Taxon Names to Final Names
+zxc = c("Collinsella", "Eubacterium eligens group", "Haemophilus", "Acidaminococcus", "Unass. Lachnospiraceae", "Dialister", "Bifidobacterium", "Streptococcus", "Faecalibacterium", "Butyrivibrio", "Eubacteriumsiraeum group", "Turicibacter", "Oscillospirales UCG-010", "Eubacterium xylanophilum group", "Lachnospiraceae ND3007 group", "Unass. Butyricicoccaceae", "Anaerovoracaceae UCG-001", "Howardella", "Gastranaerophilales", "Terrisporobacter", "Lachnospiraceae UCG-008", "Defluviitaleaceae UCG-011", "Oscillospiraceae NK4A214 group", "Clostridia UCG-014", "Asteroleplasma", "Lactococcus", "Lachnospiraceae UCG-003", "Phascolarctobacterium", "Muribaculaceae")
+heat.df$Genus = zxc
+
+rownames(heat.df) = heat.df$Genus
+heat.df$Rho = round(heat.df$Rho, 2)
+heat.df = as.data.frame(heat.df[,2])
+heat.df = transpose(heat.df)
+colnames(heat.df) = zxc
+rownames(heat.df) = c("Rho")
+head(heat.df)
+```
+
+
+Do a heatmap:
+
+```{r}
+library("pheatmap")
+library(data.table)
+library(RColorBrewer)
+
+pheatmap(heat.df, cluster_rows = FALSE, cluster_cols = FALSE, angle_col = "315", display_numbers = TRUE, color = colorRampPalette(c("#286f93ff", "#a1c3d1ff", "white", "#cb97a1ff", "#a65864ff"))(1000))
+```
+
+**Figura 2c is already created**
+
+## Figure 3. Systematic associations
+
+This figure was inspired by [Jackson et al., 2018](https://www.nature.com/articles/s41467-018-05184-7)
+
+**Load Genus summary table**
+
+```{r}
+rhoDataGenus = read.csv2("./Spearman-Tables/summaryGenus.csv", sep = ",", dec = ".", header = TRUE)
+rownames(rhoDataGenus) = rhoDataGenus$Taxon
+rhoDataGenus = rhoDataGenus[, c(2:length(colnames(rhoDataGenus)))]
+rhoDataGenus
+```
+
+**Load Phylum summary table**
+
+```{r}
+rhoDataPhylum = read.csv2("./Spearman-Tables/summaryPhylum.csv", sep = ",", dec = ".", header = TRUE)
+rownames(rhoDataPhylum) = rhoDataPhylum$Taxon
+rhoDataPhylum = rhoDataPhylum[, c(2:length(colnames(rhoDataPhylum)))]
+rhoDataPhylum
+```
+
+### Fig. 3b. Covariables vs Genus (Spearman's Rho heatmap)
+
+Set an specific order for the columns. I'll try to join related diet variables, and leave BMI as the last variable.
+
+```{r}
+library("pheatmap")
+library(data.table)
+library(RColorBrewer)
+
+# To set 0 as white
+range <- max(abs(rhoDataGenus))
+
+ord = c("Milk", "Yogurt", "Bread", "Pasta", "Nuts", "Legumes", "Garnish.Vegetables", "Salad", "Green.Beans.and.Chard.and.Spinach", "Other.Fruits","Beef.and.pork.and.lamb", "Minced.Beef", "Ham", "Pizza.Croquette.and.others", "Pastries", "Sugar.sweetened.beverages", "Spirits", "Wine", "BMI")
+
+pheatmap(rhoDataGenus[,ord], color = colorRampPalette(c("#286f93ff", "#a1c3d1ff", "white",
+                                                        "#cb97a1ff", "#a65864ff"))(1000), 
+         cluster_cols = FALSE, breaks = seq(-range, range, length.out = 1000),
+         border_color = NA, angle_col = "45", fontsize_col = 12)
+```
+
+Save it to 1000X1200 and modify it with inkscape
+
+### Fig. 3b. Covariables vs Phylum (Spearman's Rho heatmap)
+
+```{r}
+library("pheatmap")
+library(data.table)
+library(RColorBrewer)
+
+# To set 0 as white
+range <- max(abs(rhoDataPhylum))
+
+ord = c("Milk", "Seafood", "Salad", "Citrus", "Store.bought.Juice", "Sweets", "Pastries", "Sugar.sweetened.beverages", "Spirits", "Wine", "BMI")
+
+pheatmap(rhoDataPhylum[,ord], color = colorRampPalette(c("#286f93ff", "#a1c3d1ff", "white",
+                                                         "#cb97a1ff", "#a65864ff"))(1000),
+         cluster_cols = FALSE, breaks = seq(-range, range, length.out = 1000),
+         border_color = NA, angle_col = "45", fontsize_col = 12)
+```
+
+
+
+## Group different diet variables (genus):
+
+Let's do the following groups and include them into f_physeqcCov_R6_rel's sample_data().
+
+    Bebidas fermentadas: cerveza + vino 
+
+    Bebidas alcohólicas: cerveza + vino + destilados 
+
+    Frutas: otras frutas + cítricos + zumo natura 
+
+    Verduras: ensalada + judias ... + verdura guarnción + patata 
+
+    Lácteos: leche + yogur + queso + postres lácteos 
+
+    Carne: carne + carne picada + pollo/pavo + jamon 
+
+    Pescados y mariscos: blanco + azul + marisco 
+
+    Rico en azúcar: chocolate, galletas maria, galletas chocolate, bollería, pasteles, golosinas, helados, bebidas azucaradas, zumo comercial, postres lácteos y destilados 
+
+    Rico en hidratos de carboo: pan, arroz y pasta 
+    
+```{r}
+sample_data(f_physeqCov_R6_rel)$Fermented.Drinks.Mes = (sample_data(f_physeqCov_R6_rel)$Cerveza.Mes + sample_data(f_physeqCov_R6_rel)$Vino.Sangra.Mes)
+
+sample_data(f_physeqCov_R6_rel)$Alcohol.Mes = (sample_data(f_physeqCov_R6_rel)$Cerveza.Mes + sample_data(f_physeqCov_R6_rel)$Vino.Sangra.Mes + sample_data(f_physeqCov_R6_rel)$Cerveza.Mes + sample_data(f_physeqCov_R6_rel)$Destilados.Mes)
+
+sample_data(f_physeqCov_R6_rel)$Frutas.Mes = (sample_data(f_physeqCov_R6_rel)$Citricos.Mes + sample_data(f_physeqCov_R6_rel)$Zumo.Natural.Mes + sample_data(f_physeqCov_R6_rel)$Otras.Frutas.Mes)
+
+sample_data(f_physeqCov_R6_rel)$Verduras.Mes = (sample_data(f_physeqCov_R6_rel)$Ensalada.Mes + sample_data(f_physeqCov_R6_rel)$Patatas.Mes + sample_data(f_physeqCov_R6_rel)$Verdura.Guarnicion.Mes + sample_data(f_physeqCov_R6_rel)$Judias.Verdes.Acelgas.Espinacas.Mes)
+
+sample_data(f_physeqCov_R6_rel)$Lacteos = (sample_data(f_physeqCov_R6_rel)$Leche.Mes + sample_data(f_physeqCov_R6_rel)$Yogur.Mes + sample_data(f_physeqCov_R6_rel)$Queso.Mes + sample_data(f_physeqCov_R6_rel)$Queso.Blanco.Mes + sample_data(f_physeqCov_R6_rel)$Postres.Lacteos.Mes)
+
+sample_data(f_physeqCov_R6_rel)$Carne = (sample_data(f_physeqCov_R6_rel)$Pollo.Pavo.Mes + sample_data(f_physeqCov_R6_rel)$Carne.Mes + sample_data(f_physeqCov_R6_rel)$Carne.Picada.Mes + sample_data(f_physeqCov_R6_rel)$Jamon.Mes)
+
+sample_data(f_physeqCov_R6_rel)$Pescado.Marsico = (sample_data(f_physeqCov_R6_rel)$Marisco.Mes + sample_data(f_physeqCov_R6_rel)$Pescado.Azul.Mes + sample_data(f_physeqCov_R6_rel)$Pescado.Blanco.Mes)
+
+sample_data(f_physeqCov_R6_rel)$Azucar = (sample_data(f_physeqCov_R6_rel)$Chocolate.Mes + sample_data(f_physeqCov_R6_rel)$Galletas.Maria.Mes + sample_data(f_physeqCov_R6_rel)$Galletas.Chocolate.Mes + sample_data(f_physeqCov_R6_rel)$Bolleria.Mes + sample_data(f_physeqCov_R6_rel)$Pasteles.Mes + sample_data(f_physeqCov_R6_rel)$Golosinas.Mes + sample_data(f_physeqCov_R6_rel)$Helados.Mes + sample_data(f_physeqCov_R6_rel)$Bebidas.Azucaradas.Mes + sample_data(f_physeqCov_R6_rel)$Zumo.Comercial.Mes + sample_data(f_physeqCov_R6_rel)$Postres.Lacteos.Mes + sample_data(f_physeqCov_R6_rel)$Destilados.Mes)
+
+sample_data(f_physeqCov_R6_rel)$Hidratos = (sample_data(f_physeqCov_R6_rel)$Arroz.Mes + sample_data(f_physeqCov_R6_rel)$Pasta.Mes + sample_data(f_physeqCov_R6_rel)$Pan.Mes)
+```
+
+And let's calculate the Spearman correlations with personDiet function:
+
+```{r}
+for (variable in c("Fermented.Drinks.Mes", "Alcohol.Mes", "Frutas.Mes", "Verduras.Mes", "Lacteos", "Carne", "Pescado.Marsico", "Azucar", "Hidratos")){
+  suppressWarnings(pearsonDiet(f_physeqCov_R6_rel, variable, "Genus"))
+}
+```
+
+**Load Genus summary table**
+
+```{r}
+rhoDataGenus = read.csv2("./Spearman-Tables/summaryGenusGrouped.csv", sep = ",", dec = ".", header = TRUE)
+rownames(rhoDataGenus) = rhoDataGenus$Taxon
+rhoDataGenus = rhoDataGenus[, c(2:length(colnames(rhoDataGenus)))]
+rhoDataGenus
+```
+
+**Do the plot**
+
+```{r}
+library("pheatmap")
+library(data.table)
+library(RColorBrewer)
+
+# To set 0 as white
+range <- max(abs(rhoDataGenus))
+
+pheatmap(rhoDataGenus, color = colorRampPalette(c("#286f93ff", "#a1c3d1ff", "white", "#cb97a1ff", "#a65864ff"))(1000), cluster_cols = FALSE, breaks = seq(-range, range, length.out = 1000),
+         border_color = NA, angle_col = "45", fontsize_col = 12)
+```
+
+
+## Group different diet variables (phylum):
+
+```{r}
+sample_data(physeqCov_R2_rel)$Fermented.Drinks.Mes = (sample_data(physeqCov_R2_rel)$Cerveza.Mes + sample_data(physeqCov_R2_rel)$Vino.Sangra.Mes)
+
+sample_data(physeqCov_R2_rel)$Alcohol.Mes = (sample_data(physeqCov_R2_rel)$Cerveza.Mes + sample_data(physeqCov_R2_rel)$Vino.Sangra.Mes + sample_data(physeqCov_R2_rel)$Cerveza.Mes + sample_data(physeqCov_R2_rel)$Destilados.Mes)
+
+sample_data(physeqCov_R2_rel)$Frutas.Mes = (sample_data(physeqCov_R2_rel)$Citricos.Mes + sample_data(physeqCov_R2_rel)$Zumo.Natural.Mes + sample_data(physeqCov_R2_rel)$Otras.Frutas.Mes)
+
+sample_data(physeqCov_R2_rel)$Verduras.Mes = (sample_data(physeqCov_R2_rel)$Ensalada.Mes + sample_data(physeqCov_R2_rel)$Patatas.Mes + sample_data(physeqCov_R2_rel)$Verdura.Guarnicion.Mes + sample_data(physeqCov_R2_rel)$Judias.Verdes.Acelgas.Espinacas.Mes)
+
+sample_data(physeqCov_R2_rel)$Lacteos = (sample_data(physeqCov_R2_rel)$Leche.Mes + sample_data(physeqCov_R2_rel)$Yogur.Mes + sample_data(physeqCov_R2_rel)$Queso.Mes + sample_data(physeqCov_R2_rel)$Queso.Blanco.Mes + sample_data(physeqCov_R2_rel)$Postres.Lacteos.Mes)
+
+sample_data(physeqCov_R2_rel)$Carne = (sample_data(physeqCov_R2_rel)$Pollo.Pavo.Mes + sample_data(physeqCov_R2_rel)$Carne.Mes + sample_data(physeqCov_R2_rel)$Carne.Picada.Mes + sample_data(physeqCov_R2_rel)$Jamon.Mes)
+
+sample_data(physeqCov_R2_rel)$Pescado.Marsico = (sample_data(physeqCov_R2_rel)$Marisco.Mes + sample_data(physeqCov_R2_rel)$Pescado.Azul.Mes + sample_data(physeqCov_R2_rel)$Pescado.Blanco.Mes)
+
+sample_data(physeqCov_R2_rel)$Azucar = (sample_data(physeqCov_R2_rel)$Chocolate.Mes + sample_data(physeqCov_R2_rel)$Galletas.Maria.Mes + sample_data(physeqCov_R2_rel)$Galletas.Chocolate.Mes + sample_data(physeqCov_R2_rel)$Bolleria.Mes + sample_data(physeqCov_R2_rel)$Pasteles.Mes + sample_data(physeqCov_R2_rel)$Golosinas.Mes + sample_data(physeqCov_R2_rel)$Helados.Mes + sample_data(physeqCov_R2_rel)$Bebidas.Azucaradas.Mes + sample_data(physeqCov_R2_rel)$Zumo.Comercial.Mes + sample_data(physeqCov_R2_rel)$Postres.Lacteos.Mes + sample_data(physeqCov_R2_rel)$Destilados.Mes)
+
+sample_data(physeqCov_R2_rel)$Hidratos = (sample_data(physeqCov_R2_rel)$Arroz.Mes + sample_data(physeqCov_R2_rel)$Pasta.Mes + sample_data(physeqCov_R2_rel)$Pan.Mes)
+```
+
+And let's calculate the Spearman correlations with personDiet function:
+
+```{r}
+for (variable in c("Fermented.Drinks.Mes", "Alcohol.Mes", "Frutas.Mes", "Verduras.Mes", "Lacteos", "Carne", "Pescado.Marsico", "Azucar", "Hidratos")){
+  suppressWarnings(pearsonDiet(physeqCov_R2_rel, variable, "Phylum"))
+}
+```
+
+I won't make the figure, since only two groups are significant.
+
+
+### Counting associations
+
+Number of genera associated to each variable
+
+```{r}
+apply(rhoDataGenus,2,function(x) sum(x != 0))
+```
+
+Number of variables associated to each genera
+
+```{r}
+apply(rhoDataGenus,1,function(x) sum(x != 0))
+```
+
+Number of phylum associated to each variable
+
+```{r}
+apply(rhoDataPhylum,2,function(x) sum(x != 0))
+```
+
+Number of variables associated to each phylum
+
+```{r}
+apply(rhoDataPhylum,1,function(x) sum(x != 0))
+```
+
+
+Combining phylum + genus to variable:
+
+```{r}
+g = apply(rhoDataGenus,2,function(x) sum(x != 0))
+p = apply(rhoDataPhylum,2,function(x) sum(x != 0))
+v3 = c(g, p)
+tapply(v3, names(v3), sum)
+```
+
+
+
+
+# Additional Analyses
+
+## Diet vs. Age:
+
+Metadata is stored in several phyloseq objects created along the project. So, let's use one of them (i.e., physeqCov) to perform the comparisons.
+
+Let's use a Spearman rank correlation.
+
+```{r}
+# For storing each p.value retrieved
+p.values = c()
+# For storing rho values
+rhos = c()
+# For storing variables
+variables = c()
+for (variable in c("Leche.Mes", "Yogur.Mes", "Chocolate.Mes", "Cereales.Inflados.Mes",
+                   "Galletas.Maria.Mes", "Galletas.Chocolate.Mes", "Bolleria.Mes", "Ensalada.Mes",
+                   "Judias.Verdes.Acelgas.Espinacas.Mes", "Verdura.Guarnicion.Mes", "Patatas.Mes",
+                   "Legumbres.Mes", "Arroz.Mes", "Pasta.Mes", "Sopa.Crema.Mes", "Huevos.Mes",
+                   "Pollo.Pavo.Mes", "Carne.Mes", "Carne.Picada.Mes", "Pescado.Blanco.Mes",
+                   "Pescado.Azul.Mes", "Marisco.Mes", "Croquetas.Empanadillas.Pizza.Mes", "Pan.Mes",
+                   "Jamon.Mes", "Queso.Blanco.Mes", "Queso.Mes", "Citricos.Mes", "Otras.Frutas.Mes",
+                   "Zumo.Natural.Mes", "Zumo.Comercial.Mes", "Frutos.Seco.Mes", "Postres.Lacteos.Mes",
+                   "Pasteles.Mes", "Chips.Mes", "Golosinas.Mes", "Helados.Mes",
+                   "Bebidas.Azucaradas.Mes", "Bebidas.Light.Mes", "Vino.Sangra.Mes", "Cerveza.Mes",
+                   "Cerveza.Sin.Alcohol.Mes", "Destilados.Mes")){
+  r = cor.test(as.vector(as.matrix(sample_data(physeqCov)[, "Edad"])),
+         as.vector(as.matrix(sample_data(physeqCov)[, variable])),  method = "spearman")
+  # Store the value of this round
+  p.values = c(p.values, r$p.value)
+  rhos = c(rhos, r$estimate)
+  variables = c(variables, variable)
+}
+
+res = data.frame(variables, p.values, rhos, p.adjust(p.values, method = "BH"))
+colnames(res) = c("Variable", "p.value", "rho", "p.adj")
+# Remove non-significant taxa
+sig = res[res$p.adj < 0.05, ]
+
+write.table(sig, "../../SciRep/Supplementary-Tables/NewTables-Revision/Supplementary_Table_Y_dietVSage",
+                  sep = ",",row.names = FALSE)
+```
+
+## Diet vs. Sex:
+
+Now, we will use a Wilcoxon rank-sum test.
+
+```{r}
+# For storing each p.value retrieved
+p.values = c()
+# For storing variables
+variables = c()
+# To store male and female average values
+maleAVG = c()
+femaleAVG = c()
+for (variable in c("Leche.Mes", "Yogur.Mes", "Chocolate.Mes", "Cereales.Inflados.Mes",
+                   "Galletas.Maria.Mes", "Galletas.Chocolate.Mes", "Bolleria.Mes", "Ensalada.Mes",
+                   "Judias.Verdes.Acelgas.Espinacas.Mes", "Verdura.Guarnicion.Mes", "Patatas.Mes",
+                   "Legumbres.Mes", "Arroz.Mes", "Pasta.Mes", "Sopa.Crema.Mes", "Huevos.Mes",
+                   "Pollo.Pavo.Mes", "Carne.Mes", "Carne.Picada.Mes", "Pescado.Blanco.Mes",
+                   "Pescado.Azul.Mes", "Marisco.Mes", "Croquetas.Empanadillas.Pizza.Mes", "Pan.Mes",
+                   "Jamon.Mes", "Queso.Blanco.Mes", "Queso.Mes", "Citricos.Mes", "Otras.Frutas.Mes",
+                   "Zumo.Natural.Mes", "Zumo.Comercial.Mes", "Frutos.Seco.Mes", "Postres.Lacteos.Mes",
+                   "Pasteles.Mes", "Chips.Mes", "Golosinas.Mes", "Helados.Mes",
+                   "Bebidas.Azucaradas.Mes", "Bebidas.Light.Mes", "Vino.Sangra.Mes", "Cerveza.Mes",
+                   "Cerveza.Sin.Alcohol.Mes", "Destilados.Mes")){
+  male = as.vector(as.matrix(sample_data(physeqCov)[sample_data(physeqCov)$Gender == "Male",
+                                                    variable]))
+  female = as.vector(as.matrix(sample_data(physeqCov)[sample_data(physeqCov)$Gender == "Female",
+                                                      variable]))
+  r = wilcox.test(male, female)
+  # Store the value of this round
+  p.values = c(p.values, r$p.value)
+  variables = c(variables, variable)
+  maleAVG = c(maleAVG, mean(male))
+  femaleAVG = c(femaleAVG, mean(female))
+}
+
+res = data.frame(variables, p.values, p.adjust(p.values, method = "BH"), maleAVG, femaleAVG)
+colnames(res) = c("Variable", "p.value", "p.adj", "maleAVG", "femaleAVG")
+# Remove non-significant taxa
+sig = res[res$p.adj < 0.05, ]
+
+write.table(sig, "../../SciRep/Supplementary-Tables/NewTables-Revision/Supplementary_Table_Y_dietVSsex",
+                  sep = ",",row.names = FALSE)
+```
