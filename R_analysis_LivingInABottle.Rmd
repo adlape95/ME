@@ -1,0 +1,993 @@
+---
+title: "Living in a bottle: Bacteria from sediment-associated Mediterranean waste and potential growth on polyethylene terephthalate (PET)"
+author: "Adriel Latorre-Pérez - Darwin Bioprospecting Excellence S.L."
+date: "2020-2021"
+output: html_document
+---
+
+```{r}
+# Remove R data
+rm (list = ls())
+```
+
+
+# Data import
+
+Data has been already imported into phyloseq, so the .Rdata file has to be loaded:
+
+```{r}
+library(phyloseq)
+load("./study.RData")
+```
+
+physeq1 = phyloseq object at the ASV level (absolute abundances)
+
+Check the number of seqs per sample and the overall sequencing stats.
+
+```{r}
+sample_sums(physeq1)
+summary(sample_sums(physeq1))
+```
+
+# Rarefaction curves
+
+```{r}
+library("iNEXT")
+library(ggplot2)
+Rarefaction <- iNEXT(as.data.frame(otu_table(physeq1)), q=0, datatype="abundance")
+Rareplot1 <- ggiNEXT(x=Rarefaction, type=1) + theme_bw() +
+  geom_line(size=0.1) +
+  geom_point(size=0, na.rm = TRUE) +
+  scale_shape_manual(values=c(rep(20,55))) + xlab("Number of sequences") + ylab("Richness (Observed OTUs)")
+Rareplot1
+```
+
+# Alpha diversity
+
+By each sample type:
+
+```{r}
+library(ggplot2)
+p = plot_richness(rarefy_even_depth(physeq1, rngseed = 711), x="SampleType2", color="SampleType2", measures=c("Observed","Simpson", "Shannon")) + xlab("") + ylab("") + geom_point() + geom_boxplot(alpha = .4) + theme_light()
+p
+```
+
+**Find differences between control and plastic**
+
+*Richness:*
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+rich = estimate_richness(physeq1)
+wilcox.test(rich$Observed[sample_data(physeq1)$SampleType2 == "Control"], rich$Observed[sample_data(physeq1)$SampleType2 == "Plastic"])
+```
+
+NO!
+
+*Simpson*
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+rich = estimate_richness(physeq1)
+wilcox.test(rich$Simpson[sample_data(physeq1)$SampleType2 == "Control"], rich$Simpson[sample_data(physeq1)$SampleType2 == "Plastic"])
+```
+
+No
+
+*Shannon*
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+rich = estimate_richness(physeq1)
+wilcox.test(rich$Shannon[sample_data(physeq1)$SampleType2 == "Control"], rich$Shannon[sample_data(physeq1)$SampleType2 == "Plastic"])
+```
+
+No.
+
+**Control vs. can**
+
+*Richness:*
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+rich = estimate_richness(physeq1)
+wilcox.test(rich$Observed[sample_data(physeq1)$SampleType2 == "Control"], rich$Observed[sample_data(physeq1)$SampleType2 == "Can"])
+```
+
+NO
+
+*Simpson*
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+rich = estimate_richness(physeq1)
+wilcox.test(rich$Simpson[sample_data(physeq1)$SampleType2 == "Control"], rich$Simpson[sample_data(physeq1)$SampleType2 == "Can"])
+```
+
+NO
+
+*Shannon*
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+rich = estimate_richness(physeq1)
+wilcox.test(rich$Shannon[sample_data(physeq1)$SampleType2 == "Control"], rich$Shannon[sample_data(physeq1)$SampleType2 == "Can"])
+```
+
+NO
+
+**Can vs. plastic**
+
+*Richness:*
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+rich = estimate_richness(physeq1)
+wilcox.test(rich$Observed[sample_data(physeq1)$SampleType2 == "Plastic"], rich$Observed[sample_data(physeq1)$SampleType2 == "Can"])
+```
+
+NO
+
+*Simpson*
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+rich = estimate_richness(physeq1)
+wilcox.test(rich$Simpson[sample_data(physeq1)$SampleType2 == "Plastic"], rich$Simpson[sample_data(physeq1)$SampleType2 == "Can"])
+```
+
+NO
+
+*Shannon*
+
+```{r echo=FALSE, warning=FALSE, comment=FALSE}
+rich = estimate_richness(physeq1)
+wilcox.test(rich$Shannon[sample_data(physeq1)$SampleType2 == "Plastic"], rich$Shannon[sample_data(physeq1)$SampleType2 == "Can"])
+```
+
+No
+
+
+**CONCLUSION: no significant differences in terms of alpha diversity**
+
+--------------------------------------------------------------------------------------------
+
+
+# Principal Coordinates Analysis (PCoA)
+
+## ASV level
+
+Calculate relative abudnances
+
+```{r}
+physeq1_rel  = transform_sample_counts(physeq1, function(x) x / sum(x)*100 )
+sample_sums(physeq1_rel)
+```
+
+And create the graph
+
+```{r}
+library(ggrepel)
+library(ggplot2)
+# Calculate distance matrix
+brayDist <- phyloseq::distance(physeq1_rel, method="bray")
+# Calculate ordination
+iMDS  <- ordinate(physeq1_rel, distance=brayDist, method = "PCoA")
+## Make plot
+# Create plot, store as temp variable, p
+p <- plot_ordination(physeq1_rel, iMDS, color ="SampleType2") + theme_light()
+# Costumize the plot
+p = p + geom_point(aes(size=3, alpha = 0.6)) + geom_text_repel(aes(label = SampleName))
+p
+```
+
+
+## PERMANOVA
+
+```{r}
+library(vegan)
+physeq33 <- as(sample_data(physeq1_rel), "data.frame")
+adonis2(brayDist ~ SampleType2, data = physeq33)
+```
+
+No significant differences
+
+## Genus level
+
+Calculate relative abundances
+
+```{r}
+physeq_R6 <- tax_glom(physeq1, taxrank = rank_names(physeq1)[6], NArm = FALSE)
+physeq_R6_rel  = transform_sample_counts(physeq_R6, function(x) x / sum(x)*100 )
+sample_sums(physeq_R6_rel)
+```
+
+## PCoA genus level
+
+```{r}
+library(ggrepel)
+library(ggplot2)
+# Calculate distance matrix
+brayDist <- phyloseq::distance(physeq_R6_rel, method="bray")
+# Calculate ordination
+iMDS  <- ordinate(physeq_R6_rel, distance=brayDist, method = "PCoA")
+## Make plot
+# Create plot, store as temp variable, p
+p <- plot_ordination(physeq_R6_rel, iMDS, color ="SampleType2") + theme_light()
+# Costumize the plot
+p = p + geom_point(aes(size=3, alpha = 0.6)) + geom_text_repel(aes(label = SampleName))
+p
+ggsave("./Figures/PCoA-L6-all.svg", plot = p)
+```
+
+## PERMANOVA
+
+```{r}
+library(vegan)
+physeq33 <- as(sample_data(physeq_R6_rel), "data.frame")
+adonis2(brayDist ~ SampleType2, data = physeq33)
+```
+
+# PCoA without Plastic-2
+
+Let's remove this sample, which is clearly different to the rest by whatever reason.
+
+## ASV level
+
+```{r}
+physeq1_noP2 = subset_samples(physeq1, SampleName != "Plastic-2")
+physeq1_noP2
+```
+
+```{r}
+physeq1_noP2_rel  = transform_sample_counts(physeq1_noP2, function(x) x / sum(x)*100 )
+sample_sums(physeq1_noP2_rel)
+```
+
+```{r}
+library(ggrepel)
+library(ggplot2)
+# Calculate distance matrix
+brayDist <- phyloseq::distance(physeq1_noP2_rel, method="bray")
+# Calculate ordination
+iMDS  <- ordinate(physeq1_noP2_rel, distance=brayDist, method = "PCoA")
+## Make plot
+# Create plot, store as temp variable, p
+p <- plot_ordination(physeq1_noP2_rel, iMDS, color ="SampleType2") + theme_light()
+# Costumize the plot
+p = p + geom_point(aes(size=3, alpha = 0.6)) + geom_text_repel(aes(label = SampleName))
+p
+# ggsave("./Figures/PCoA-OTU-noP2.png", plot = p, device = "png")
+```
+
+```{r}
+library(vegan)
+physeq33 <- as(sample_data(physeq1_noP2_rel), "data.frame")
+adonis2(brayDist ~ SampleType2, data = physeq33)
+```
+
+## Genus level
+
+```{r}
+physeq_R6_noP2 = subset_samples(physeq_R6, SampleName != "Plastic-2")
+physeq_R6_noP2
+```
+
+```{r}
+physeq_R6_noP2_rel  = transform_sample_counts(physeq_R6_noP2, function(x) x / sum(x)*100 )
+sample_sums(physeq_R6_noP2_rel)
+```
+
+```{r}
+library(ggrepel)
+library(ggplot2)
+# Calculate distance matrix
+brayDist <- phyloseq::distance(physeq_R6_noP2_rel, method="bray")
+# Calculate ordination
+iMDS  <- ordinate(physeq_R6_noP2_rel, distance=brayDist, method = "PCoA")
+## Make plot
+# Create plot, store as temp variable, p
+p <- plot_ordination(physeq_R6_noP2_rel, iMDS, color ="SampleType2") + theme_light()
+# Costumize the plot
+p = p + geom_point(aes(size=3, alpha = 0.6)) + geom_text_repel(aes(label = SampleName))
+p
+ggsave("./Figures/PCoA-L6-noP2.svg", plot = p)
+```
+
+```{r}
+library(vegan)
+physeq33 <- as(sample_data(physeq_R6_noP2_rel), "data.frame")
+adonis2(brayDist ~ SampleType2, data = physeq33)
+```
+
+# PCoA Can vs. Plastic
+
+Only Can and Plastic samples (without Plastic-2)
+
+## ASV level
+
+```{r}
+physeq1_set = subset_samples(physeq1, SampleType2 == "Can" | SampleType2 == "Plastic")
+physeq1_set = subset_samples(physeq1_set, SampleName != "Plastic-2")
+sample_sums(physeq1_set)
+```
+
+```{r}
+physeq1_set_rel  = transform_sample_counts(physeq1_set, function(x) x / sum(x)*100 )
+sample_sums(physeq1_set_rel)
+```
+
+```{r}
+library(ggrepel)
+library(ggplot2)
+# Calculate distance matrix
+brayDist <- phyloseq::distance(physeq1_set_rel, method="bray")
+# Calculate ordination
+iMDS  <- ordinate(physeq1_set_rel, distance=brayDist, method = "PCoA")
+## Make plot
+# Create plot, store as temp variable, p
+p <- plot_ordination(physeq1_set_rel, iMDS, color ="SampleType2") + theme_light()
+# Costumize the plot
+p = p + geom_point(aes(size=3, alpha = 0.6)) + geom_text_repel(aes(label = SampleName))
+p
+# ggsave("./Figures/PCoA-OTU-noP2.png", plot = p, device = "png")
+```
+
+```{r}
+library(vegan)
+physeq33 <- as(sample_data(physeq1_set_rel), "data.frame")
+adonis2(brayDist ~ SampleType2, data = physeq33)
+```
+
+No differences
+
+## GEnus level
+
+```{r}
+physeq_R6_set = subset_samples(physeq_R6, SampleType2 == "Can" | SampleType2 == "Plastic")
+physeq_R6_set = subset_samples(physeq_R6_set, SampleName != "Plastic-2")
+physeq_R6_set
+```
+
+```{r}
+physeq_R6_set_rel  = transform_sample_counts(physeq_R6_set, function(x) x / sum(x)*100 )
+sample_sums(physeq_R6_set_rel)
+```
+
+```{r}
+library(ggrepel)
+library(ggplot2)
+# Calculate distance matrix
+brayDist <- phyloseq::distance(physeq_R6_set_rel, method="bray")
+# Calculate ordination
+iMDS  <- ordinate(physeq_R6_set_rel, distance=brayDist, method = "PCoA")
+## Make plot
+# Create plot, store as temp variable, p
+p <- plot_ordination(physeq_R6_set_rel, iMDS, color ="SampleType2") + theme_light()
+# Costumize the plot
+p = p + geom_point(aes(size=3, alpha = 0.6)) + geom_text_repel(aes(label = SampleName))
+p
+ggsave("./Figures/PCoA-L6-can&plastic.svg", plot = p)
+```
+
+```{r}
+library(vegan)
+physeq33 <- as(sample_data(physeq_R6_set_rel), "data.frame")
+adonis2(brayDist ~ SampleType2, data = physeq33)
+```
+
+No differences
+
+---------------------------------------------------------------------
+
+# Bacterial taxonomic profiles
+
+# Genus level
+
+```{r echo=FALSE, reuslts=FALSE, warning=FALSE, comment=FALSE}
+# Tabla nivel de genero para trabajar con EXCEL
+all = phyloseq_to_df(physeq_R6_rel, sorting = NULL)
+write.table(all, row.names = FALSE, file = "./rel_otu_table_L6.csv", quote = FALSE, sep = '\t', dec = '.')
+```
+
+I've modified this table manually on Excel to select the top 20 genera. Let's load this new table
+
+```{r echo=FALSE, results=FALSE, warning=FALSE, comment=FALSE}
+top20 = read.csv2("./Taxonomy-tables/top_L6_noOther.csv", sep = ",", dec = ".")
+colnames(top20)[c(6, 11, 16)] = c(" ", "  ", "   ")
+top20
+```
+
+```{r echo=FALSE, results=FALSE, warning=FALSE, comment=FALSE}
+library(tidyr)
+# The arguments to gather():
+# - data: Data object
+# - key: Name of new key column (made from names of data columns)
+# - value: Name of new value column
+# - ...: Names of source columns that contain values
+# - factor_key: Treat the new key column as a factor (instead of character vector)
+long.top20 <- gather(top20, Condition, Relative_abundance, Control.1:Biofilm.1, factor_key=TRUE)
+long.top20
+```
+
+Do the graph
+
+```{r echo=FALSE, comment=FALSE}
+library(ggplot2)
+library(forcats)
+library(RColorBrewer)
+
+# Creo una paleta semi-automática
+getPalette = colorRampPalette(brewer.pal(9, "Set1"))
+palette = rev(getPalette(20))
+palette[c(1,20)] = c("#d9d9d9", "#ff8282")
+
+p = ggplot(long.top20, aes(fill = fct_reorder(Taxon, Order, .desc = TRUE), y=Relative_abundance, x=Condition)) + 
+    geom_bar( stat="identity", color = "black")
+p = p + ylab("Relative abundance (%)") + xlab("") + guides(fill=guide_legend(ncol=2, title = "Taxa"))
+p = p + theme(axis.text.x = element_text(angle = 45, hjust = 1), panel.background = element_rect(fill = "white", colour = "grey"))
+p = p + scale_fill_manual(values = palette)
+p
+# ggsave(filename = "./Figures/genera.png", plot = p, device = "png")
+```
+
+Make the graph interactive
+
+```{r}
+library(ggplot2)
+library(plotly)
+fig = ggplotly(p)
+
+htmlwidgets::saveWidget(fig, "genera.html")
+```
+
+## Phylum level taxonomy
+
+Just repeat the commands above but changing some parameters.
+
+```{r}
+physeq_R2 <- tax_glom(physeq1, taxrank = rank_names(physeq1)[2], NArm = FALSE)
+physeqfull_relabund_R2  = transform_sample_counts(physeq_R2, function(x) x / sum(x)*100)
+physeq_R2
+```
+
+
+```{r echo=FALSE, reuslts=FALSE, warning=FALSE, comment=FALSE}
+# Tabla nivel de genero para trabajar con EXCEL
+all = phyloseq_to_df(physeqfull_relabund_R2, sorting = NULL)
+write.table(all, row.names = FALSE, file = "./rel_otu_table_L2.csv", quote = FALSE, sep = '\t', dec = '.')
+```
+
+Modify the table in Excel and load it again.
+
+```{r}
+top20 = read.csv2("./Taxonomy-tables/top_L2.csv", sep = ",", dec = ".")
+colnames(top20)[c(6, 11, 16)] = c(" ", "  ", "   ")
+top20
+```
+
+Change to long format.
+
+```{r}
+library(tidyr)
+# The arguments to gather():
+# - data: Data object
+# - key: Name of new key column (made from names of data columns)
+# - value: Name of new value column
+# - ...: Names of source columns that contain values
+# - factor_key: Treat the new key column as a factor (instead of character vector)
+long.top20 <- gather(top20, Condition, Relative_abundance, Control.1:Biofilm.1, factor_key=TRUE)
+long.top20
+```
+
+Create the figure
+
+```{r}
+library(forcats)
+library(ggplot2)
+library(RColorBrewer)
+
+# Vamos a construir una paleta de colores semi-automática con 20 colores
+getPalette = colorRampPalette(brewer.pal(9, "Set3"))
+
+p = ggplot(long.top20, aes(fill = fct_reorder(Taxon, Order, .desc = TRUE), y=Relative_abundance, x=Condition)) + 
+    geom_bar( stat="identity", color = "black")
+p = p + ylab("Relative abundance (%)") + xlab("") + guides(fill=guide_legend(ncol=2, title = "Taxa"))
+p = p + theme(axis.text.x = element_text(angle = 45, hjust = 1), panel.background = element_rect(fill = "white", colour = "grey"))
+p = p + scale_fill_manual(values = rev(getPalette(20))) 
+p
+# ggsave(filename = "./Figures/Phylum.png", plot = p, device = "png")
+```
+
+Make it interactive
+
+```{r}
+library(ggplot2)
+library(plotly)
+fig = ggplotly(p)
+
+htmlwidgets::saveWidget(fig, "phylum.html")
+```
+
+---------------------------------------------------------------------
+
+# Differential abundance analysis with DESeq2 - Genus Level
+
+We are going to do pairwise test for the different sample types.
+
+## Can Vs Control
+
+```{r results=FALSE, warning=FALSE, echo = FALSE, message=FALSE}
+library(DESeq2)
+set1 = subset_samples(physeq_R6, SampleType2 == "Can" | SampleType2 == "Control")
+sample_data(set1)$SampleType2 = relevel(sample_data(set1)$SampleType2, "Control")
+# TRASFORMATION TO DESeq2
+diagdds = phyloseq_to_deseq2(set1, ~ SampleType2)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+
+Sort by p-value, remove NA values and format the results.
+
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.05
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(set1)[rownames(sigtab), ], "matrix"))
+sigtab
+write.table(sigtab, "./Deseq2-Tables/CanVsControl.csv", sep = ",",row.names = FALSE)
+```
+
+
+## Plastic Vs Control
+
+Just repeat the same commands
+
+```{r results=FALSE, warning=FALSE, echo = FALSE, message=FALSE}
+library(DESeq2)
+set1 = subset_samples(physeq_R6, SampleType2 == "Plastic" | SampleType2 == "Control")
+sample_data(set1)$SampleType2 = relevel(sample_data(set1)$SampleType2, "Control")
+# TRASFORMATION TO DESeq2
+diagdds = phyloseq_to_deseq2(set1, ~ SampleType2)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+
+
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.05
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(set1)[rownames(sigtab), ], "matrix"))
+sigtab
+write.table(sigtab, "./Deseq2-Tables/PlasticVsControl.csv", sep = ",",row.names = FALSE)
+```
+
+## Plastic Vs Can
+
+```{r results=FALSE, warning=FALSE, echo = FALSE, message=FALSE}
+library(DESeq2)
+set1 = subset_samples(physeq_R6, SampleType2 == "Plastic" | SampleType2 == "Can")
+sample_data(set1)$SampleType2 = relevel(sample_data(set1)$SampleType2, "Can")
+# TRASFORMATION TO DESeq2
+diagdds = phyloseq_to_deseq2(set1, ~ SampleType2)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+
+
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.05
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(set1)[rownames(sigtab), ], "matrix"))
+sigtab
+write.table(sigtab, "./Deseq2-Tables/PlasticVsCan.csv", sep = ",",row.names = FALSE)
+```
+
+# Differential abundance analysis with DESeq2 - Phylum Level
+
+## Can Vs Control
+
+```{r results=FALSE, warning=FALSE, echo = FALSE, message=FALSE}
+library(DESeq2)
+set1 = subset_samples(physeq_R2, SampleType2 == "Can" | SampleType2 == "Control")
+sample_data(set1)$SampleType2 = relevel(sample_data(set1)$SampleType2, "Control")
+# TRASFORMATION TO DESeq2
+diagdds = phyloseq_to_deseq2(set1, ~ SampleType2)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.05
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(set1)[rownames(sigtab), ], "matrix"))
+sigtab
+write.table(sigtab, "./Deseq2-Tables/CanVsControl-phylum.csv", sep = ",",row.names = FALSE)
+```
+
+
+## Plastic Vs Control
+
+```{r results=FALSE, warning=FALSE, echo = FALSE, message=FALSE}
+library(DESeq2)
+set1 = subset_samples(physeq_R2, SampleType2 == "Plastic" | SampleType2 == "Control")
+sample_data(set1)$SampleType2 = relevel(sample_data(set1)$SampleType2, "Control")
+# TRASFORMATION TO DESeq2
+diagdds = phyloseq_to_deseq2(set1, ~ SampleType2)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+
+
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.05
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(set1)[rownames(sigtab), ], "matrix"))
+sigtab
+write.table(sigtab, "./Deseq2-Tables/PlasticVsControl-phylum.csv", sep = ",",row.names = FALSE)
+```
+
+## Plastic Vs Can
+
+```{r results=FALSE, warning=FALSE, echo = FALSE, message=FALSE}
+library(DESeq2)
+set1 = subset_samples(physeq_R2, SampleType2 == "Plastic" | SampleType2 == "Can")
+sample_data(set1)$SampleType2 = relevel(sample_data(set1)$SampleType2, "Can")
+# TRASFORMATION TO DESeq2
+diagdds = phyloseq_to_deseq2(set1, ~ SampleType2)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+
+
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.05
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(set1)[rownames(sigtab), ], "matrix"))
+sigtab
+write.table(sigtab, "./Deseq2-Tables/PlasticVsCan_phylum.csv", sep = ",",row.names = FALSE)
+```
+
+
+
+--------------------------------------------------------------------------------------------
+
+# VENN DIAGRAM: MICROBIOME PACKAGE (Nivel Género)
+
+## v1 CORE MICROBIOME (GENUS) PLASTIC
+
+Abundance >0.1%
+Prevalence >= 50%
+
+```{r}
+library(microbiome)
+plastic = subset_samples(physeq_R6_rel, SampleType2 == "Plastic")
+
+# SELECT CORE TAXA AND CREATE A PHYLOSEQ OBJECT
+pseq.core <- core(plastic, detection = 0.1, prevalence = .49)
+# get the taxonomy data
+tax.mat <- tax_table(pseq.core)
+tax.df <- as.data.frame(tax.mat[,c(1:6)])
+# Creat a string
+tax.string = paste(tax.df$Rank1, tax.df$Rank2, tax.df$Rank3, tax.df$RAnk4, tax.df$Rank5, tax.df$Rank6, sep = ";")
+```
+
+Write this into a file:
+
+```{r}
+write.table(tax.string, "./Venn/Plastic-core-50.txt", sep = ",", dec = ".", row.names = FALSE, col.names = FALSE)
+```
+
+## v1 CORE MICROBIOME (GENUS) CAN
+
+Abundance >0.1%
+Prevalence >= 50%
+
+```{r}
+library(microbiome)
+can = subset_samples(physeq_R6_rel, SampleType2 == "Can")
+
+# SELECT CORE TAXA AND CREATE A PHYLOSEQ OBJECT
+pseq.core <- core(can, detection = 0.1, prevalence = .49)
+# get the taxonomy data
+tax.mat <- tax_table(pseq.core)
+tax.df <- as.data.frame(tax.mat[,c(1:6)])
+# Creat a string
+tax.string = paste(tax.df$Rank1, tax.df$Rank2, tax.df$Rank3, tax.df$RAnk4, tax.df$Rank5, tax.df$Rank6, sep = ";")
+```
+
+```{r}
+write.table(tax.string, "./Venn/Can-core-50.txt", sep = ",", dec = ".", row.names = FALSE, col.names = FALSE)
+```
+
+## v1 CORE MICROBIOME (GENUS) CONTROL
+
+Abundance >0.1%
+Prevalence >= 50%
+
+```{r}
+library(microbiome)
+control = subset_samples(physeq_R6_rel, SampleType2 == "Control")
+
+# SELECT CORE TAXA AND CREATE A PHYLOSEQ OBJECT
+pseq.core <- core(control, detection = 0.1, prevalence = .49)
+# get the taxonomy data
+tax.mat <- tax_table(pseq.core)
+tax.df <- as.data.frame(tax.mat[,c(1:6)])
+# Creat a string
+tax.string = paste(tax.df$Rank1, tax.df$Rank2, tax.df$Rank3, tax.df$RAnk4, tax.df$Rank5, tax.df$Rank6, sep = ";")
+```
+
+```{r}
+write.table(tax.string, "./Venn/Control-core-50.txt", sep = ",", dec = ".", row.names = FALSE, col.names = FALSE)
+```
+
+## v1 CORE MICROBIOME (GENUS) BIOFILM
+
+Abundance >0.1%
+Prevalence >= 50%
+
+```{r}
+library(microbiome)
+biofilm = subset_samples(physeq_R6_rel, SampleType2 == "Biofilm")
+
+# SELECT CORE TAXA AND CREATE A PHYLOSEQ OBJECT
+pseq.core <- core(biofilm, detection = 0.1, prevalence = .49)
+# get the taxonomy data
+tax.mat <- tax_table(pseq.core)
+tax.df <- as.data.frame(tax.mat[,c(1:6)])
+# Creat a string
+tax.string = paste(tax.df$Rank1, tax.df$Rank2, tax.df$Rank3, tax.df$RAnk4, tax.df$Rank5, tax.df$Rank6, sep = ";")
+```
+
+```{r}
+write.table(tax.string, "./Venn/Biofilm-core-50.txt", sep = ",", dec = ".", row.names = FALSE, col.names = FALSE)
+```
+
+## Create the figure
+
+The easiest way to create the Venn diagrams is to use this [web](http://bioinformatics.psb.ugent.be/webtools/Venn/) and the txt files as input.
+
+-----------------------------------------------------------------------------------------------
+
+# AMPVIS2 HEATMAP
+## ALTERNATIVE TO BARPLOT
+
+See [heatmaps con amvpis2](http://albertsenlab.org/ampvis2-heatmap/)
+
+Load data into ampvis2:
+
+```{r}
+library(ampvis2)
+if(!require("devtools"))
+  install.packages("devtools")
+#source the phyloseq_to_ampvis2() function from the gist
+devtools::source_gist("8d0ca4206a66be7ff6d76fc4ab8e66c6")
+
+# Necesitamos cambiar los colnames de la taxtable:
+colnames(tax_table(physeq1_rel)) = c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
+#go converty
+ampvis2_obj <- phyloseq_to_ampvis2(physeq1_rel)
+
+# Cambiamos el metadata para que la figura salga con el orden y los nombres que queremos
+rownames(ampvis2_obj$metadata) = ampvis2_obj$metadata[,"SampleName"]
+colnames(ampvis2_obj$abund) = ampvis2_obj$metadata[,"SampleName"]
+```
+
+As data is already normalised,  normalise = FALSE
+
+## Heatmap Phylum
+
+```{r}
+p = amp_heatmap(
+      data = ampvis2_obj,
+      normalise = FALSE,
+      tax_show = 20,
+      tax_aggregate = "Phylum",
+      plot_values_size = 3,
+      min_abundance = 0.01,
+      order_x_by = c("Control-1","Control-2","Control-3","Can-1", "Can-2", "Can-3", "Can-4","Plastic-1",
+                     "Plastic-2","Plastic-3", "Plastic-4","Biofilm-1")
+    )
+p
+# ggsave("./Amp_heatmap_Phylum.svg", p)
+```
+
+**OTHER VERSION**
+
+```{r}
+p = amp_heatmap(
+      data = ampvis2_obj,
+      normalise = FALSE,
+      tax_show = 20,
+      tax_aggregate = "Phylum",
+      plot_values_size = 3,
+      min_abundance = 0.01,
+  color_vector = c("royalblue3",
+                   "whitesmoke",
+                   "lightcoral"),
+      order_x_by = c("Control-1","Control-2","Control-3","Can-1", "Can-2", "Can-3", "Can-4","Plastic-1", "Plastic-2","Plastic-3", "Plastic-4","Biofilm-1")
+    )
+p
+# ggsave("./Amp_heatmap_Phylum_v2.svg", p)
+```
+
+## Heatmap Genus
+
+```{r}
+library(ampvis2)
+if(!require("devtools"))
+  install.packages("devtools")
+#source the phyloseq_to_ampvis2() function from the gist
+devtools::source_gist("8d0ca4206a66be7ff6d76fc4ab8e66c6")
+
+# Necesitamos cambiar los colnames de la taxtable:
+colnames(tax_table(physeq_R6_rel)) = c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
+#go converty
+ampvis2_obj <- phyloseq_to_ampvis2(physeq_R6_rel)
+
+# Cambiamos el metadata para que la figura salga con el orden y los nombres que queremos
+rownames(ampvis2_obj$metadata) = ampvis2_obj$metadata[,"SampleName"]
+colnames(ampvis2_obj$abund) = ampvis2_obj$metadata[,"SampleName"]
+```
+
+
+```{r}
+p = amp_heatmap(
+      data = ampvis2_obj,
+      normalise = FALSE,
+      tax_show = 20,
+      tax_aggregate = "Genus",
+      plot_values_size = 3,
+      min_abundance = 0.01,
+      color_vector = c("royalblue3",
+                       "whitesmoke",
+                       "lightcoral"),
+      order_x_by = c("Control-1","Control-2","Control-3","Can-1", "Can-2", "Can-3", "Can-4","Plastic-1", "Plastic-2","Plastic-3", "Plastic-4","Biofilm-1")
+    )
+p
+# ggsave("./Amp_heatmap_Genus.svg", p, limitsize = FALSE)
+```
+
+
+----------------------------------------------------------------
+
+# CFU analysis
+
+## Load the data
+
+```{r}
+CFU = read.csv2("./CFU-data/CFU-data.csv", sep = "\t")
+head(CFU)
+```
+
+## Perform a wilcoxon test for all the samples
+
+```{r}
+res = c()
+
+for (i in unique(CFU$Sample)) {
+  aux = CFU[CFU$Sample == i,]
+  plastic = aux[aux$CultureType == "Plastic", "CFU"]
+  control = aux[aux$CultureType == "Control", "CFU"]
+  res = c(res, wilcox.test(plastic, control)$p.value)
+}
+
+df = data.frame (unique(CFU$Sample), res)
+colnames(df) = c("Sample", "p.value")
+df
+
+write.table(df, file = "wilcoxon-results.csv", sep = "\t", dec = ",",
+            row.names = FALSE)
+```
+
+## Load the data for the figure
+
+```{r}
+CFU = read.csv2("./CFU-data/CFU-data-v2.csv", sep = "\t")
+head(CFU)
+```
+
+Create the figure
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+p = ggplot(data=CFU, aes(x=CultureType, y=CFUAvg, fill=CultureType)) + 
+  facet_wrap( ~ Sample, scales = "free") +
+  geom_bar(stat="identity", color="black", 
+           position=position_dodge(), width = 0.8, alpha = 0.7) +
+  geom_errorbar(aes(ymin=CFUAvg-SD, ymax=CFUAvg+SD), width=.2,
+                 position=position_dodge(.9)) + 
+  theme_light() + xlab("") + ylab("CFU") +
+  theme(axis.text.x = element_blank()) +
+  scale_fill_brewer(palette = "Paired") +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE))
+
+p
+```
+
+--------------------------------------------------------------------------
+
+# Accessory function (phyloseq_to_df)
+
+```{r}
+phyloseq_to_df <- function(physeq, addtax = T, addtot = F, addmaxrank = F, sorting = "abundance"){
+
+  # require(phyloseq)
+
+  ## Data validation
+  if(any(addtax == TRUE || sorting == "taxonomy")){
+    if(is.null(phyloseq::tax_table(physeq, errorIfNULL = F))){
+      stop("Error: taxonomy table slot is empty in the input data.\n")
+    }
+  }
+
+  ## Prepare data frame
+  if(taxa_are_rows(physeq) == TRUE){
+    res <- data.frame(OTU = phyloseq::taxa_names(physeq), phyloseq::otu_table(physeq), stringsAsFactors = F)
+  } else {
+    res <- data.frame(OTU = phyloseq::taxa_names(physeq), t(phyloseq::otu_table(physeq)), stringsAsFactors = F)
+  }
+
+  ## Check if the sample names were silently corrected in the data.frame
+  if(any(!phyloseq::sample_names(physeq) %in% colnames(res)[-1])){
+    if(addtax == FALSE){
+      warning("Warning: Sample names were converted to the syntactically valid column names in data.frame. See 'make.names'.\n")
+    }
+
+    if(addtax == TRUE){
+      stop("Error: Sample names in 'physeq' could not be automatically converted to the syntactically valid column names in data.frame (see 'make.names'). Consider renaming with 'sample_names'.\n")
+    }
+  }
+
+  ## Add taxonomy
+  if(addtax == TRUE){
+
+    ## Extract taxonomy table
+    taxx <- as.data.frame(phyloseq::tax_table(physeq), stringsAsFactors = F)
+
+    ## Reorder taxonomy table
+    taxx <- taxx[match(x = res$OTU, table = rownames(taxx)), ]
+
+    ## Add taxonomy table to the data
+    res <- cbind(res, taxx)
+
+    ## Add max tax rank column
+    if(addmaxrank == TRUE){
+
+      ## Determine the lowest level of taxonomic classification
+      res$LowestTaxRank <- get_max_taxonomic_rank(taxx, return_rank_only = TRUE)
+
+      ## Reorder columns (OTU name - Taxonomy - Max Rank - Sample Abundance)
+      res <- res[, c("OTU", phyloseq::rank_names(physeq), "LowestTaxRank", phyloseq::sample_names(physeq))]
+
+    } else {
+      ## Reorder columns (OTU name - Taxonomy - Sample Abundance)
+      res <- res[, c("OTU", phyloseq::rank_names(physeq), phyloseq::sample_names(physeq))]
+
+    } # end of addmaxrank
+  }   # end of addtax
+
+  ## Reorder OTUs
+  if(!is.null(sorting)){
+
+    ## Sort by OTU abundance
+    if(sorting == "abundance"){
+      otus <- res[, which(colnames(res) %in% phyloseq::sample_names(physeq))]
+      res <- res[order(rowSums(otus, na.rm = T), decreasing = T), ]
+    }
+
+    ## Sort by OTU taxonomy
+    if(sorting == "taxonomy"){
+      taxtbl <- as.data.frame( phyloseq::tax_table(physeq), stringsAsFactors = F )
+
+      ## Reorder by all columns
+      taxtbl <- taxtbl[do.call(order, taxtbl), ]
+      # taxtbl <- data.table::setorderv(taxtbl, cols = colnames(taxtbl), na.last = T)
+      res <- res[match(x = rownames(taxtbl), table = res$OTU), ]
+    }
+  }
+
+  ## Add OTU total abundance
+  if(addtot == TRUE){
+    res$Total <- rowSums(res[, which(colnames(res) %in% phyloseq::sample_names(physeq))])
+  }
+
+  rownames(res) <- NULL
+  return(res)
+}
+```
+
